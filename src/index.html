@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Legends Awakened</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ambient background -->
+  <div class="bg">
+    <div class="bg-glow"></div>
+    <div class="bg-grid"></div>
+    <div class="embers" id="embers"></div>
+    <div class="bg-vignette"></div>
+  </div>
+
+  <!-- frameless custom chrome -->
+  <header class="chrome" data-tauri-drag-region>
+    <div class="chrome-brand" data-tauri-drag-region>
+      <span class="chrome-mark"></span>
+      <span class="chrome-name">LEGENDS&nbsp;AWAKENED</span>
+    </div>
+    <div class="chrome-win">
+      <button class="winbtn" id="min" title="Minimize" tabindex="-1">
+        <svg viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6"/></svg>
+      </button>
+      <button class="winbtn winbtn--x" id="close" title="Close" tabindex="-1">
+        <svg viewBox="0 0 12 12"><line x1="3" y1="3" x2="9" y2="9"/><line x1="9" y1="3" x2="3" y2="9"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="app">
+    <!-- left: brand -->
+    <section class="hero">
+      <div class="emblem">
+        <span class="emblem-ring"></span>
+        <span class="emblem-core"></span>
+        <i class="el el--earth"></i><i class="el el--fire"></i><i class="el el--water"></i><i class="el el--air"></i>
+      </div>
+      <h1 class="hero-title">Legends<br><span>Awakened</span></h1>
+      <p class="hero-tag">Avatar · Legends of the Arena</p>
+      <div class="hero-status" id="status">
+        <span class="dot"></span><span id="statusText">Looking for your game…</span>
+      </div>
+
+      <div class="services" id="services">
+        <div class="svc" data-svc="gateway"><span class="svc-dot"></span>Gateway</div>
+        <div class="svc" data-svc="database"><span class="svc-dot"></span>Database</div>
+        <div class="svc" data-svc="game_server"><span class="svc-dot"></span>Arena</div>
+        <div class="svc-players"><b id="playersN">—</b><span>online</span></div>
+      </div>
+
+      <button type="button" class="update-btn" id="checkUpdates">
+        <svg viewBox="0 0 16 16" class="update-ico"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2v3h-3"/></svg>
+        <span id="updateText">Check for updates</span>
+      </button>
+    </section>
+
+    <!-- right: controls -->
+    <section class="panel">
+      <div class="field">
+        <label>Server</label>
+        <input id="host" type="text" spellcheck="false" autocomplete="off" placeholder="gw.legends-awakened.com" />
+      </div>
+
+      <div class="field">
+        <label>Room code <i>optional</i></label>
+        <input id="room" type="text" spellcheck="false" autocomplete="off" placeholder="blank = open matchmaking" />
+      </div>
+
+      <div class="field">
+        <label>Queue</label>
+        <div class="seg" id="queue">
+          <button type="button" data-q="2"><b>2</b><small>duel</small></button>
+          <button type="button" data-q="3"><b>3</b><small>trio</small></button>
+          <button type="button" data-q="4"><b>4</b><small>arena</small></button>
+          <span class="seg-glider" id="segGlider"></span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Display</label>
+        <div class="display-row">
+          <button type="button" class="toggle" id="fs"><span class="toggle-track"><span class="toggle-dot"></span></span><b>Fullscreen</b></button>
+          <div class="select-wrap">
+            <select id="res"></select>
+            <svg class="select-caret" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4"/></svg>
+          </div>
+        </div>
+        <div class="launch-as" id="launchAs"></div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="play" id="play"><span class="play-label">PLAY</span><span class="play-shine"></span></button>
+        <button type="button" class="windowed" id="playWin" title="Launch in a window">⊡ Windowed</button>
+      </div>
+      <div class="toast" id="toast"></div>
+    </section>
+  </main>
+
+  <script src="main.js"></script>
+</body>
+</html>
