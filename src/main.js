@@ -5,9 +5,11 @@ const getWin = () => (TAURI.window && TAURI.window.getCurrentWindow) ? TAURI.win
 
 const $ = (id) => document.getElementById(id);
 const DEFAULT_HOST = 'gw.legends-awakened.com'; // official gateway; used when none is saved
-let state = { host: '', room: '', queue: 4, fullscreen: true, width: 1920, height: 1080 };
+let state = { host: '', room: '', queue: 4, fullscreen: true, width: 1920, height: 1080, hd_textures: false, gamescope: false, gamescope_args: '' };
 let native = [0, 0];
 let resolutions = [];
+let hdAvailable = false;
+let gsAvailable = false;
 let found = false;
 
 // ---- embers ----
@@ -44,6 +46,31 @@ function setFullscreen(on) {
   $('fs').classList.toggle('on', on);
   renderLaunchAs();
 }
+function setHd(on) {
+  state.hd_textures = on;
+  $('hd').classList.toggle('on', on);
+  $('hdState').textContent = '';
+}
+async function toggleHd() {
+  if (!hdAvailable) return;
+  const on = !state.hd_textures;
+  setHd(on);
+  $('hd').classList.add('busy'); $('hdState').textContent = on ? 'switching to HD…' : 'restoring…';
+  try {
+    await invoke('set_textures', { hd: on });
+    $('hdState').textContent = on ? 'HD' : 'original';
+    // The engine only reads textures at startup, so the swap shows up next launch —
+    // say so, otherwise a successful toggle looks like it did nothing.
+    toast(on ? 'HD textures on — applies on next launch.' : 'Original textures restored — applies on next launch.', 'ok');
+  } catch (e) { toast(String(e), 'err'); setHd(!on); $('hdState').textContent = state.hd_textures ? 'HD' : 'original'; }
+  $('hd').classList.remove('busy');
+}
+function setGs(on) {
+  state.gamescope = on;
+  $('gs').classList.toggle('on', on);
+  $('gsArgs').hidden = !on; // only show the args field when gamescope is enabled
+}
+function toggleGs() { if (gsAvailable) setGs(!state.gamescope); }
 function buildResolutions() {
   const sel = $('res');
   sel.innerHTML = '';
@@ -82,6 +109,12 @@ async function refresh() {
   $('room').value = state.room || '';
   setQueue([2, 3, 4].includes(state.queue) ? state.queue : 4);
   setFullscreen(!!state.fullscreen);
+  hdAvailable = !!r.hd_available;
+  $('hd').hidden = !hdAvailable;
+  if (hdAvailable) { setHd(!!state.hd_textures); $('hdState').textContent = state.hd_textures ? 'HD' : 'original'; }
+  gsAvailable = !!r.gamescope_available;
+  $('gs').hidden = !gsAvailable;
+  if (gsAvailable) { $('gsArgs').value = state.gamescope_args || ''; setGs(!!state.gamescope); }
   buildResolutions();
   renderLaunchAs();
   if (found) {
@@ -105,7 +138,9 @@ async function locate() {
 function gather() {
   const [w, h] = $('res').value.split('x').map(Number);
   return { host: $('host').value.trim(), room: $('room').value.trim(), queue: state.queue,
-           fullscreen: state.fullscreen, width: w || state.width, height: h || state.height };
+           fullscreen: state.fullscreen, width: w || state.width, height: h || state.height,
+           hd_textures: state.hd_textures,
+           gamescope: state.gamescope, gamescope_args: ($('gsArgs').value || '').trim() };
 }
 
 let toastTimer;
@@ -192,6 +227,9 @@ async function syncContent(manual) {
 window.addEventListener('DOMContentLoaded', () => {
   $('queue').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setQueue(+b.dataset.q); });
   $('fs').addEventListener('click', () => setFullscreen(!state.fullscreen));
+  $('hd').addEventListener('click', toggleHd);
+  $('gs').addEventListener('click', toggleGs);
+  $('gsArgs').addEventListener('input', () => { state.gamescope_args = $('gsArgs').value; });
   $('res').addEventListener('change', () => { const [w, h] = $('res').value.split('x').map(Number); state.width = w; state.height = h; renderLaunchAs(); });
   $('host').addEventListener('input', () => { clearTimeout(statusDebounce); statusDebounce = setTimeout(pollStatus, 800); });
   $('play').addEventListener('click', () => play(false));

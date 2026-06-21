@@ -57,6 +57,28 @@ Frontend is plain `src/index.html` + `styles.css` + `main.js` (no bundler;
 `withGlobalTauri` exposes `window.__TAURI__`). Rust commands are in
 `src-tauri/src/lib.rs` (`load`, `save`, `locate`, `play`, `status`).
 
+### Linux: gamescope wrap (Wayland / hybrid GPUs)
+The game is a 2008 wine title. Under a Wayland compositor (Hyprland, etc.) it can
+show desktop through the window, jump to the wrong monitor, or — on hybrid
+AMD+NVIDIA laptops — render on the dead GPU. The fix is to launch the game inside
+**gamescope** (a micro-compositor that isolates it, routes it to a chosen GPU, and
+gives clean fullscreen). The launcher GUI itself runs normally; only the game
+subprocess is wrapped.
+
+This is **opt-in** (the GPU device is per-machine, so auto-enabling could black-screen
+a hybrid laptop). Set these in the environment the launcher runs in:
+
+| Env var | Effect |
+|---|---|
+| `AVATAR_GAMESCOPE=1` | wrap the game in gamescope (`auto` = on when gamescope is on PATH) |
+| `AVATAR_GAMESCOPE_ARGS` | gamescope args for this box, e.g. `--prefer-vk-device 1002:1638 -W 1920 -H 1080 -w 800 -h 600` |
+| `AVATAR_VK_ICD` | sets `VK_ICD_FILENAMES` (pin the Vulkan driver, e.g. `/usr/share/vulkan/icd.d/radeon_icd.json`) |
+
+The launcher always appends `-f -- wine <exe>`. Note: the launcher launches the
+**Config-respecting** `AvatarMP_Windowed.exe`, so the game is *not* capped at 800×600
+— `-w 800 -h 600` is only needed if you force the raw `AvatarMP.exe`; otherwise let
+it render at your Config resolution (sharper than upscaling 800×600).
+
 ## Build
 
 Tauri builds **on** the OS it targets (you can't make a `.dmg` from Linux), so

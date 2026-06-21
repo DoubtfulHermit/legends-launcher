@@ -240,3 +240,17 @@ body {
 .update-btn.is-busy { pointer-events: none; opacity: .7; }
 .update-btn.is-busy .update-ico { animation: update-spin .8s linear infinite; }
 @keyframes update-spin { to { transform: rotate(360deg); } }
+
+/* ---- HD textures toggle (Display) ---- */
+.hd-toggle { margin-top: 12px; display: inline-flex; align-items: center; gap: 9px; }
+.hd-toggle b { font-weight: 600; }
+.hd-toggle #hdState, .hd-toggle i {
+  font-style: normal; font-size: 10px; letter-spacing: .04em; color: var(--muted, #8a8a8a);
+  text-transform: uppercase;
+}
+.hd-toggle.on #hdState { color: var(--fire); }
+.hd-toggle.busy { pointer-events: none; opacity: .65; }
+.hd-toggle.busy #hdState { animation: hd-pulse 1s ease-in-out infinite; }
+@keyframes hd-pulse { 0%,100% { opacity: .4 } 50% { opacity: 1 } }
+/* gamescope args field — sits under the Gamescope toggle, styled like the other inputs */
+.gs-args { margin-top: 8px; font-size: 12px; }

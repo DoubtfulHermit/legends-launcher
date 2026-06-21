@@ -90,6 +90,16 @@
           </div>
         </div>
         <div class="launch-as" id="launchAs"></div>
+        <button type="button" class="toggle hd-toggle" id="hd" hidden>
+          <span class="toggle-track"><span class="toggle-dot"></span></span>
+          <b>HD textures</b><i id="hdState"></i>
+        </button>
+        <button type="button" class="toggle hd-toggle" id="gs" hidden>
+          <span class="toggle-track"><span class="toggle-dot"></span></span>
+          <b>Gamescope</b><i>Wayland / hybrid GPU</i>
+        </button>
+        <input id="gsArgs" class="gs-args" type="text" spellcheck="false" autocomplete="off"
+               placeholder="-W 1920 -H 1080   (hybrid GPU? add --prefer-vk-device 1002:1638)" hidden />
       </div>
 
       <div class="actions">

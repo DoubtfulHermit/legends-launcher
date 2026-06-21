@@ -14,11 +14,18 @@ struct Settings {
     fullscreen: bool,   // Config.ini FullScreen
     width: u32,         // Config.ini Width
     height: u32,        // Config.ini Height
+    #[serde(default)]
+    hd_textures: bool,  // overlay the AI-upscaled Textures.hd set (vs originals)
+    #[serde(default)]
+    gamescope: bool,        // Linux: wrap the game launch in gamescope
+    #[serde(default)]
+    gamescope_args: String, // extra gamescope args (GPU/output, e.g. "--prefer-vk-device 1002:1638 -W 1920 -H 1080")
 }
 impl Default for Settings {
     fn default() -> Self {
         Settings { host: String::new(), room: String::new(), queue: 4,
-                   fullscreen: true, width: 1920, height: 1080 }
+                   fullscreen: true, width: 1920, height: 1080, hd_textures: false,
+                   gamescope: false, gamescope_args: String::new() }
     }
 }
 
@@ -29,6 +36,8 @@ struct LoadResult {
     settings: Settings,
     native: [u32; 2],           // primary monitor native resolution
     resolutions: Vec<[u32; 2]>, // selectable resolutions (curated + native + current)
+    hd_available: bool,         // both Textures.original/ and Textures.hd/ exist
+    gamescope_available: bool,  // Linux + gamescope on PATH (so the toggle is usable)
 }
 
 // ---- locating the game install ----------------------------------------------
@@ -67,6 +76,31 @@ fn remember_game_dir(p: &Path) {
     if let Some(store) = config_store() {
         if let Some(parent) = store.parent() { let _ = fs::create_dir_all(parent); }
         let _ = fs::write(store, p.to_string_lossy().as_bytes());
+    }
+}
+
+// Per-user launcher prefs that don't belong in the game's own config files (gamescope
+// is a desktop/GPU setting, not game data) — kept next to the remembered game-dir so we
+// never risk confusing arena_link.dll's INI parser.
+fn prefs_path() -> Option<PathBuf> { cfg_home().map(|d| d.join("legends-launcher.conf")) }
+fn read_prefs(s: &mut Settings) {
+    if let Some(txt) = prefs_path().and_then(|p| fs::read_to_string(p).ok()) {
+        for line in txt.lines() {
+            if let Some((k, v)) = line.split_once('=') {
+                match k.trim() {
+                    "gamescope" => s.gamescope = v.trim() == "1" || v.trim().eq_ignore_ascii_case("true"),
+                    "gamescope_args" => s.gamescope_args = v.trim().to_string(),
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+fn write_prefs(s: &Settings) {
+    if let Some(p) = prefs_path() {
+        if let Some(parent) = p.parent() { let _ = fs::create_dir_all(parent); }
+        let _ = fs::write(p, format!("gamescope={}\ngamescope_args={}\n",
+            if s.gamescope { 1 } else { 0 }, s.gamescope_args));
     }
 }
 
@@ -193,23 +227,97 @@ fn resolution_list(native: [u32; 2], current: [u32; 2]) -> Vec<[u32; 2]> {
     v
 }
 
+// ---- HD texture pack --------------------------------------------------------
+// game/Textures is the live set the engine loads. game/Textures.original holds the
+// pristine backup, game/Textures.hd the AI-upscaled set. The launcher swaps the live
+// set between them and records which is active in Textures/.texture-set, so it only
+// copies when the choice actually changes.
+fn tex_dirs(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let g = dir.join("game");
+    (g.join("Textures"), g.join("Textures.original"), g.join("Textures.hd"))
+}
+fn dir_has_files(p: &Path) -> bool {
+    fs::read_dir(p).map(|rd| rd.flatten().any(|e| e.path().is_file())).unwrap_or(false)
+}
+// HD is only usable when BOTH sets actually contain files — not merely that the
+// folders exist. A distribution that shipped empty Textures.hd/ Textures.original/
+// (the dirs travelled but the 160M of textures didn't) used to satisfy is_dir() and
+// show a toggle that copied nothing; require real content so it stays hidden until
+// the patcher has delivered the pack.
+fn hd_available(dir: &Path) -> bool {
+    let (_a, orig, hd) = tex_dirs(dir);
+    dir_has_files(&orig) && dir_has_files(&hd)
+}
+fn texture_marker(dir: &Path) -> PathBuf { tex_dirs(dir).0.join(".texture-set") }
+fn current_texture_set(dir: &Path) -> String {
+    fs::read_to_string(texture_marker(dir)).unwrap_or_default().trim().to_string()
+}
+// Copy every file in `src` over the same name in `dst` (Textures is a flat folder).
+// The bitmap-font atlases (tex_font_*) are skipped: fonts are always the HD (1024)
+// atlas, which the game's per-font Scale in AvatarMP.vmo is sized for, so the
+// HD/original texture toggle must never revert them (doing so would shrink all text).
+fn copy_over(src: &Path, dst: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(src).map_err(|e| format!("read {}: {e}", src.display()))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let p = entry.path();
+        if p.is_file() {
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with("tex_font_") { continue; }
+            fs::copy(&p, dst.join(&name)).map_err(|e| format!("copy {name:?}: {e}"))?;
+        }
+    }
+    Ok(())
+}
+// Make the live Textures folder match `hd` (true = HD overlay, false = originals).
+// No-op when already in that state (the marker matches) or when the sets are absent.
+fn apply_textures(dir: &Path, hd: bool) -> Result<(), String> {
+    if !hd_available(dir) { return Ok(()); }
+    let want = if hd { "hd" } else { "original" };
+    if current_texture_set(dir) == want { return Ok(()); }
+    let (active, orig, hdd) = tex_dirs(dir);
+    copy_over(if hd { &hdd } else { &orig }, &active)?;
+    let _ = fs::write(texture_marker(dir), want);
+    Ok(())
+}
+
 // ---- commands ---------------------------------------------------------------
 #[tauri::command]
 fn load(app: tauri::AppHandle) -> LoadResult {
     let native = app.primary_monitor().ok().flatten()
         .map(|m| { let s = m.size(); [s.width, s.height] }).unwrap_or([0, 0]);
+    let gs = gamescope_available();
     match resolve_game_dir() {
         Some(dir) => {
-            let settings = read_settings(&dir);
+            let mut settings = read_settings(&dir);
+            settings.hd_textures = current_texture_set(&dir) == "hd";
+            read_prefs(&mut settings);
             let resolutions = resolution_list(native, [settings.width, settings.height]);
-            LoadResult { found: true, game_dir: Some(dir.to_string_lossy().into()), settings, native, resolutions }
+            LoadResult { found: true, game_dir: Some(dir.to_string_lossy().into()), settings,
+                         native, resolutions, hd_available: hd_available(&dir), gamescope_available: gs }
         }
         None => {
-            let settings = Settings::default();
+            let mut settings = Settings::default();
+            read_prefs(&mut settings);
             let resolutions = resolution_list(native, [settings.width, settings.height]);
-            LoadResult { found: false, game_dir: None, settings, native, resolutions }
+            LoadResult { found: false, game_dir: None, settings, native, resolutions,
+                         hd_available: false, gamescope_available: gs }
         }
     }
+}
+
+// Swap the live texture set immediately (called when the toggle flips, so the copy
+// happens then with UI feedback rather than stalling launch). Async so the file copy
+// runs off the UI thread.
+#[tauri::command]
+async fn set_textures(hd: bool) -> Result<(), String> {
+    let dir = resolve_game_dir().ok_or("game folder not found")?;
+    // Explicit user action: fail loudly if the pack can't be applied, rather than
+    // the old silent no-op (apply_textures stays lenient for the play() safety net).
+    if !hd_available(&dir) {
+        return Err("HD texture pack isn't installed — run \"Check for updates\" to download it.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || apply_textures(&dir, hd))
+        .await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -217,6 +325,7 @@ fn save(settings: Settings) -> Result<(), String> {
     let dir = resolve_game_dir().ok_or("game folder not found")?;
     write_config(&dir, &settings)?;
     write_arena(&dir, &settings)?;
+    write_prefs(&settings);
     Ok(())
 }
 
@@ -449,7 +558,24 @@ fn wine_prefix_of(dir: &Path) -> Option<PathBuf> {
     None
 }
 
-fn spawn_game(dir: &Path, exe_path: &Path) -> Result<(), String> {
+// Is `bin` runnable from PATH? (used to decide whether gamescope is available)
+#[cfg(target_os = "linux")]
+fn on_path(bin: &str) -> bool {
+    std::env::var_os("PATH").map_or(false, |paths| {
+        std::env::split_paths(&paths).any(|p| p.join(bin).is_file())
+    })
+}
+
+// Whether the gamescope toggle should be offered: Linux + gamescope installed.
+fn gamescope_available() -> bool {
+    #[cfg(target_os = "linux")] { on_path("gamescope") }
+    #[cfg(not(target_os = "linux"))] { false }
+}
+
+// `gamescope`/`gamescope_args` come from the launcher's Display toggle (Linux only).
+// Env vars (AVATAR_GAMESCOPE / AVATAR_GAMESCOPE_ARGS / AVATAR_VK_ICD) still override.
+#[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+fn spawn_game(dir: &Path, exe_path: &Path, gamescope: bool, gamescope_args: &str) -> Result<(), String> {
     use std::process::Command;
     #[cfg(target_os = "windows")]
     {
@@ -460,9 +586,49 @@ fn spawn_game(dir: &Path, exe_path: &Path) -> Result<(), String> {
     {
         // AvatarMP.exe is a Windows binary — on Linux/macOS run it through wine,
         // pointing WINEPREFIX at the prefix the game folder lives inside.
+        let prefix = wine_prefix_of(dir);
+
+        // Optional gamescope wrap (Linux). A 2008 wine game under a Wayland compositor
+        // (Hyprland, etc.) hits transparency / wrong-monitor bugs and, on hybrid
+        // AMD+NVIDIA laptops, can render on the dead GPU. gamescope isolates the game
+        // into its own micro-compositor, routes it to a chosen GPU, and gives clean
+        // fullscreen. Opt-in — the GPU device is machine-specific, so auto-enabling it
+        // could black-screen a hybrid laptop (the very failure we're avoiding):
+        //   AVATAR_GAMESCOPE=1            enable ("auto" = on when gamescope is found)
+        //   AVATAR_GAMESCOPE_ARGS="…"     gamescope args, e.g. the values that work on
+        //                                 a given box: "--prefer-vk-device 1002:1638
+        //                                 -W 1920 -H 1080 -w 800 -h 600"
+        //   AVATAR_VK_ICD=/path/icd.json  sets VK_ICD_FILENAMES (pin the Vulkan driver)
+        // We always append `-f` (fullscreen) and the wine invocation.
+        #[cfg(target_os = "linux")]
+        {
+            let env_want = std::env::var("AVATAR_GAMESCOPE").unwrap_or_default().to_ascii_lowercase();
+            let env_enable = matches!(env_want.as_str(), "1" | "on" | "true" | "yes")
+                || (env_want == "auto" && on_path("gamescope"));
+            if gamescope || env_enable {
+                if !on_path("gamescope") {
+                    return Err("Gamescope is enabled but isn't installed (not on PATH).".into());
+                }
+                let mut cmd = Command::new("gamescope");
+                cmd.current_dir(dir);
+                if let Some(p) = &prefix { cmd.env("WINEPREFIX", p); }
+                if let Ok(icd) = std::env::var("AVATAR_VK_ICD") { cmd.env("VK_ICD_FILENAMES", icd); }
+                // Args from the toggle's field; fall back to the env override.
+                let args = if !gamescope_args.trim().is_empty() {
+                    gamescope_args.to_string()
+                } else {
+                    std::env::var("AVATAR_GAMESCOPE_ARGS").unwrap_or_default()
+                };
+                cmd.args(args.split_whitespace());
+                cmd.arg("-f").arg("--").arg("wine").arg(exe_path);
+                cmd.spawn().map_err(|e| format!("launch via gamescope: {e}"))?;
+                return Ok(());
+            }
+        }
+
         let mut cmd = Command::new("wine");
         cmd.arg(exe_path).current_dir(dir);
-        if let Some(p) = wine_prefix_of(dir) { cmd.env("WINEPREFIX", p); }
+        if let Some(p) = prefix { cmd.env("WINEPREFIX", p); }
         cmd.spawn().map_err(|e|
             format!("launch via wine ({}): {e} — is wine installed?", exe_path.display()))?;
     }
@@ -477,13 +643,17 @@ fn play(settings: Settings, windowed: bool) -> Result<(), String> {
     if windowed { s.fullscreen = false; }
     write_config(&dir, &s)?;
     write_arena(&dir, &s)?;
+    write_prefs(&s);
+    // Safety net: make sure the live textures match the toggle (normally a no-op —
+    // set_textures already applied it when the toggle was flipped).
+    apply_textures(&dir, s.hd_textures)?;
     // ALWAYS launch AvatarMP_Windowed.exe — it's the Config-respecting client that
     // honours Width/Height/FullScreen and pairs with BuildingBlocks/zz_uiscale.dll to
     // scale the fixed 800x600 2D UI up to the real resolution. AvatarMP.exe ignores
     // Config.ini (hardcoded 800x600 top-left), so only use it as a last-resort fallback.
     let windowed_exe = dir.join("AvatarMP_Windowed.exe");
     let target = if windowed_exe.is_file() { windowed_exe } else { dir.join("AvatarMP.exe") };
-    spawn_game(&dir, &target)
+    spawn_game(&dir, &target, s.gamescope, &s.gamescope_args)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -516,7 +686,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, self_update])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, self_update, set_textures])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
