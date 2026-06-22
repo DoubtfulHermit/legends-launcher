@@ -200,6 +200,54 @@ body {
 .launch-as .native { color: var(--good); }
 .launch-as .warn { color: var(--fire-soft); }
 
+/* version label (bottom of panel) */
+.version {
+  margin-top: 16px; text-align: center; font-size: 10.5px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--smoke); opacity: .85;
+}
+
+/* update modal */
+.modal {
+  position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+  background: rgba(4, 3, 2, .66); backdrop-filter: blur(3px);
+  opacity: 0; pointer-events: none; transition: opacity .18s ease;
+}
+.modal[aria-hidden="false"] { opacity: 1; pointer-events: auto; }
+.modal-card {
+  width: min(440px, 86vw); padding: 24px 26px 20px;
+  background: linear-gradient(180deg, #1a120c, #120c08);
+  border: 1px solid rgba(255, 154, 69, .22); border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .6), 0 0 0 1px rgba(0, 0, 0, .4);
+  transform: translateY(8px) scale(.98); transition: transform .18s ease;
+}
+.modal[aria-hidden="false"] .modal-card { transform: none; }
+.modal-title {
+  font-family: var(--serif); font-weight: 800; font-size: 19px; letter-spacing: .04em;
+  color: var(--fire-soft); margin-bottom: 10px;
+}
+.modal-body { font-size: 13.5px; line-height: 1.55; color: var(--bone); margin: 0 0 16px; }
+.modal-body b { color: var(--fire-soft); }
+.modal-progress { margin: 4px 0 18px; }
+.modal-progress .bar {
+  height: 8px; border-radius: 6px; overflow: hidden;
+  background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .06);
+}
+.modal-progress .bar-fill {
+  height: 100%; width: 0%; border-radius: 6px;
+  background: linear-gradient(90deg, var(--fire), var(--fire-soft)); transition: width .2s ease;
+}
+.modal-progress .bar-label { margin-top: 7px; font-size: 11px; color: var(--ash); letter-spacing: .02em; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.modal-btn {
+  cursor: pointer; border-radius: 8px; padding: 9px 18px; font-size: 13px; font-weight: 700;
+  letter-spacing: .03em; border: 1px solid transparent; transition: .15s;
+}
+.modal-btn.ghost { background: transparent; color: var(--ash); border-color: rgba(255, 255, 255, .12); }
+.modal-btn.ghost:hover { color: var(--bone); background: rgba(255, 255, 255, .06); }
+.modal-btn.primary { background: linear-gradient(180deg, var(--fire-soft), var(--fire)); color: #1a0c03; }
+.modal-btn.primary:hover { filter: brightness(1.07); }
+.modal-btn:disabled { opacity: .5; cursor: default; filter: none; }
+
 /* actions */
 .actions { display: flex; gap: 10px; margin-top: 4px; }
 .play {

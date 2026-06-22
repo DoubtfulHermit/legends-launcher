@@ -5,7 +5,7 @@ const getWin = () => (TAURI.window && TAURI.window.getCurrentWindow) ? TAURI.win
 
 const $ = (id) => document.getElementById(id);
 const DEFAULT_HOST = 'gw.legends-awakened.com'; // official gateway; used when none is saved
-let state = { host: '', room: '', queue: 4, fullscreen: true, width: 1920, height: 1080, hd_textures: false, gamescope: false, gamescope_args: '' };
+let state = { host: '', room: '', queue: 4, fullscreen: true, width: 1440, height: 1080, hd_textures: false, gamescope: false, gamescope_args: '' };
 let native = [0, 0];
 let resolutions = [];
 let hdAvailable = false;
@@ -77,20 +77,26 @@ function buildResolutions() {
   resolutions.forEach(([w, h]) => {
     const o = document.createElement('option');
     o.value = `${w}x${h}`;
-    o.textContent = `${w} × ${h}` + (native[0] === w && native[1] === h ? '  ·  native' : '');
+    o.textContent = `${w} × ${h}`;
     sel.appendChild(o);
   });
   sel.value = `${state.width}x${state.height}`;
+  // 4:3 only — if a legacy non-4:3 value was saved it won't be in the list; snap to a
+  // sensible 4:3 default (1440×1080, else the smallest offered) so the UI stays valid.
+  if (sel.selectedIndex < 0) {
+    const def = resolutions.find(([w, h]) => w === 1440 && h === 1080) || resolutions[0];
+    if (def) { state.width = def[0]; state.height = def[1]; sel.value = `${def[0]}x${def[1]}`; renderLaunchAs(); }
+  }
 }
 function renderLaunchAs() {
   const el = $('launchAs');
   const mode = state.fullscreen ? 'FULLSCREEN' : 'WINDOWED';
   let tail = '';
-  if (native[0]) {
-    if (state.fullscreen && (state.width !== native[0] || state.height !== native[1]))
-      tail = ` — <span class="warn">your display is ${native[0]}×${native[1]}</span>`;
-    else if (state.fullscreen)
+  if (native[0] && state.fullscreen) {
+    if (state.width === native[0] && state.height === native[1])
       tail = ` — <span class="native">matches your display</span>`;
+    else
+      tail = ` — <span class="native">4:3 · centered on your ${native[0]}×${native[1]} display</span>`;
   }
   el.innerHTML = `Launching as <b>${mode} · ${state.width} × ${state.height}</b>${tail}`;
 }
@@ -104,6 +110,7 @@ async function refresh() {
   try { r = await invoke('load'); }
   catch (e) { setStatus('bad', 'Launcher backend unavailable.'); return; }
   found = r.found; native = r.native || [0, 0]; resolutions = r.resolutions || [];
+  if (r.version) $('version').textContent = `Legends Awakened Launcher · v${r.version}`;
   state = { ...state, ...r.settings };
   $('host').value = state.host || DEFAULT_HOST;
   $('room').value = state.room || '';
@@ -187,39 +194,100 @@ async function pollStatus() {
   $('playersN').textContent = r.game_server ? String(r.players) : '—';
 }
 
-// ---- content patcher (download changed game files) ----
+// ---- updates: read-only CHECK → modal → apply with a download bar ----
+// Startup never downloads/overwrites anything; it only checks and, if something is
+// available, prompts. Files are fetched only after the user clicks "Update now".
 function setUpdateBtn(text, busy) {
   const t = $('updateText'); if (t) t.textContent = text;
   const b = $('checkUpdates'); if (b) b.classList.toggle('is-busy', !!busy);
 }
-async function syncContent(manual) {
+function fmtBytes(n) {
+  if (!n) return '';
+  const mb = n / (1024 * 1024);
+  return mb >= 1 ? `~${mb.toFixed(mb < 10 ? 1 : 0)} MB` : `~${Math.max(1, Math.round(n / 1024))} KB`;
+}
+let pendingUpdate = null;
+let restartPending = false;
+
+async function checkForUpdates(manual) {
   const host = ($('host').value || '').trim();
   if (!host) { if (manual) toast('Set a server first.', 'err'); return; }
   if (manual) setUpdateBtn('Checking…', true);
-  let did = false, restart = false;
-  // 1) launcher self-update (independent of the game folder; updates this binary)
-  try {
-    const u = await invoke('self_update', { host });
-    if (u && u.updated) { toast(`Launcher updated to v${u.version} — restart to apply.`, 'ok'); did = true; restart = true; }
-  } catch (e) { /* best-effort */ }
-  // 2) game content patch (needs a known game folder)
-  if (found) {
-    try {
-      const r = await invoke('sync', { host });
-      const n = (r && r.updated && r.updated.length) || 0;
-      if (r && r.ok && n) {
-        const names = r.updated.map((p) => p.replace(/^.*[\\/]/, '')).join(', ');
-        toast(`Updated ${n} game file${n > 1 ? 's' : ''}: ${names}`, 'ok'); did = true;
-      } else if (r && !r.ok && manual && !did) {
-        toast((r && r.error) ? r.error : 'Update check failed.', 'err');
-      }
-    } catch (e) { /* best-effort */ }
+  let r;
+  try { r = await invoke('check_updates', { host }); }
+  catch (e) { if (manual) { toast('Update check failed.', 'err'); setUpdateBtn('Check for updates', false); } return; }
+  const files = (r && r.content_files) || 0;
+  if ((r && r.launcher_version) || files > 0) {
+    pendingUpdate = r;
+    openUpdateModal(r);
+    if (manual) setUpdateBtn('Check for updates', false);
+  } else if (manual) {
+    if (r && r.ok) { toast('Everything is up to date.', 'ok'); setUpdateBtn('Up to date', false); }
+    else { toast((r && r.error) || 'Update check failed.', 'err'); setUpdateBtn('Check for updates', false); }
+    setTimeout(() => setUpdateBtn('Check for updates', false), 5000);
   }
-  if (manual) {
-    if (restart) setUpdateBtn('Restart to update', false);
-    else if (did) setUpdateBtn('Updated', false);
-    else { toast('Everything is up to date.', 'ok'); setUpdateBtn('Up to date', false); }
-    if (!restart) setTimeout(() => setUpdateBtn('Check for updates', false), 5000);
+}
+
+function openUpdateModal(r) {
+  const parts = [];
+  if (r.launcher_version) parts.push(`a new <b>launcher (v${r.launcher_version})</b>`);
+  if (r.content_files > 0) parts.push(`<b>${r.content_files}</b> game file${r.content_files > 1 ? 's' : ''}${r.content_bytes ? ` (${fmtBytes(r.content_bytes)})` : ''}`);
+  $('updateBody').innerHTML = `There's an update available — ${parts.join(' and ')}. Update now?`;
+  $('updateProgress').hidden = true;
+  $('updateBarFill').style.width = '0%';
+  $('updateBarLabel').textContent = '';
+  restartPending = false;
+  $('updateNow').disabled = false; $('updateNow').textContent = 'Update now';
+  $('updateLater').disabled = false; $('updateLater').textContent = 'Later';
+  $('updateModal').setAttribute('aria-hidden', 'false');
+}
+function closeUpdateModal() { $('updateModal').setAttribute('aria-hidden', 'true'); }
+
+async function applyUpdate() {
+  const r = pendingUpdate; if (!r) return;
+  const host = ($('host').value || '').trim();
+  $('updateNow').disabled = true; $('updateLater').disabled = true;
+  $('updateProgress').hidden = false;
+  let restart = false;
+
+  // 1) launcher self-update (single binary — coarse progress)
+  if (r.launcher_version) {
+    $('updateBarLabel').textContent = 'Updating launcher…';
+    $('updateBarFill').style.width = '20%';
+    try { const u = await invoke('self_update', { host }); if (u && u.updated) restart = true; } catch (e) {}
+  }
+
+  // 2) game content — live bar driven by the 'sync-progress' events from Rust
+  if (r.content_files > 0 && found) {
+    let unlisten = null;
+    try {
+      const EVT = TAURI.event;
+      if (EVT && EVT.listen) {
+        unlisten = await EVT.listen('sync-progress', (ev) => {
+          const p = ev.payload || {};
+          const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
+          $('updateBarFill').style.width = pct + '%';
+          const name = (p.file || '').replace(/^.*[\\/]/, '');
+          $('updateBarLabel').textContent = p.total ? `Downloading ${p.done}/${p.total}${name ? ' · ' + name : ''}` : 'Downloading…';
+        });
+      }
+      await invoke('sync', { host });
+      $('updateBarFill').style.width = '100%';
+    } catch (e) { toast('Some files failed to update.', 'err'); }
+    finally { if (typeof unlisten === 'function') unlisten(); }
+  }
+
+  if (restart) {
+    // launcher binary was swapped — offer a real restart so it takes effect
+    restartPending = true;
+    $('updateBarLabel').textContent = 'Launcher updated — restart to finish.';
+    $('updateNow').textContent = 'Restart now'; $('updateNow').disabled = false;
+    $('updateLater').textContent = 'Later'; $('updateLater').disabled = false;
+  } else {
+    $('updateBarLabel').textContent = 'Up to date.';
+    $('updateNow').disabled = true;
+    $('updateLater').textContent = 'Close'; $('updateLater').disabled = false;
+    toast('Update complete.', 'ok'); setTimeout(closeUpdateModal, 1100); await refresh();
   }
 }
 
@@ -237,8 +305,13 @@ window.addEventListener('DOMContentLoaded', () => {
   const win = getWin();
   $('min').addEventListener('click', () => win && win.minimize());
   $('close').addEventListener('click', () => win && win.close());
-  $('checkUpdates').addEventListener('click', () => syncContent(true));
+  $('checkUpdates').addEventListener('click', () => checkForUpdates(true));
+  $('updateNow').addEventListener('click', () => {
+    if (restartPending) invoke('restart').catch(() => {}); else applyUpdate();
+  });
+  $('updateLater').addEventListener('click', closeUpdateModal);
   ['gateway', 'database', 'game_server'].forEach((n) => setSvc(n, null)); // blink until first poll
-  refresh().then(() => { pollStatus(); syncContent(); });
+  // startup is a READ-ONLY check — only prompts (modal); never downloads on its own
+  refresh().then(() => { pollStatus(); checkForUpdates(false); });
   setInterval(pollStatus, 12000);
 });

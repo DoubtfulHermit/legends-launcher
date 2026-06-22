@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Legends Awakened</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="menu/menu.css" />
 </head>
 <body>
   <!-- ambient background -->
@@ -107,9 +108,37 @@
         <button type="button" class="windowed" id="playWin" title="Launch in a window">⊡ Windowed</button>
       </div>
       <div class="toast" id="toast"></div>
+      <div class="version" id="version"></div>
     </section>
   </main>
 
+  <!-- remade in-game menus (faithful, scalable) — same binary, shown on #/menu routes -->
+  <div id="menu-view" aria-hidden="true">
+    <div class="mnu-stage" id="mnuStage"></div>
+    <div class="mnu-controls">
+      <button id="mnuFs" class="mnu-ctl" type="button" title="Fullscreen">⛶</button>
+      <button id="mnuBack" class="mnu-ctl" type="button" title="Back to launcher">✕</button>
+    </div>
+    <div class="mnu-toast" id="mnuToast"></div>
+  </div>
+
+  <!-- update modal (shown only when check_updates finds something) -->
+  <div id="updateModal" class="modal" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-title">Update available</div>
+      <p class="modal-body" id="updateBody"></p>
+      <div class="modal-progress" id="updateProgress" hidden>
+        <div class="bar"><div class="bar-fill" id="updateBarFill"></div></div>
+        <div class="bar-label" id="updateBarLabel"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn ghost" id="updateLater" type="button">Later</button>
+        <button class="modal-btn primary" id="updateNow" type="button">Update now</button>
+      </div>
+    </div>
+  </div>
+
   <script src="main.js"></script>
+  <script src="menu/menu.js"></script>
 </body>
 </html>

@@ -5,6 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
+use tauri::Manager; // asset_protocol_scope() for the menu's texture loading
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct Settings {
@@ -24,7 +25,7 @@ struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings { host: String::new(), room: String::new(), queue: 4,
-                   fullscreen: true, width: 1920, height: 1080, hd_textures: false,
+                   fullscreen: true, width: 1440, height: 1080, hd_textures: false,
                    gamescope: false, gamescope_args: String::new() }
     }
 }
@@ -38,6 +39,7 @@ struct LoadResult {
     resolutions: Vec<[u32; 2]>, // selectable resolutions (curated + native + current)
     hd_available: bool,         // both Textures.original/ and Textures.hd/ exist
     gamescope_available: bool,  // Linux + gamescope on PATH (so the toggle is usable)
+    version: String,            // launcher version (CARGO_PKG_VERSION), shown in the UI
 }
 
 // ---- locating the game install ----------------------------------------------
@@ -212,16 +214,19 @@ fn write_arena(dir: &Path, s: &Settings) -> Result<(), String> {
     fs::write(&path, body).map_err(|e| format!("write arena_link.ini: {e}"))
 }
 
-fn resolution_list(native: [u32; 2], current: [u32; 2]) -> Vec<[u32; 2]> {
+fn resolution_list(_native: [u32; 2], current: [u32; 2]) -> Vec<[u32; 2]> {
+    // 4:3 ONLY. The game's UI is authored for 4:3 and the engine hit-tests the menus
+    // and item grids in 800x600 *design* space (no pillarbox offset), while buttons
+    // hit-test in *device* space. A single cursor mapping satisfies both only when the
+    // pillarbox offset is 0 — i.e. at 4:3. Any other aspect renders fine but breaks
+    // clicking on grids (bending-skill slots, merchant items). So we offer 4:3 sizes
+    // only; zz_uiscale fills the screen edge-to-edge at any of them.
     let mut v: Vec<[u32; 2]> = vec![
-        // 4:3 — the game's native UI aspect; zz_uiscale fills the screen edge-to-edge.
-        [1280, 960], [1440, 1080], [1600, 1200], [1920, 1440],
-        // 16:9 / ultrawide — 3D fills the width, the 4:3 UI is scaled + centered.
-        [1280, 720], [1366, 768], [1600, 900], [1920, 1080],
-        [2560, 1080], [2560, 1440], [3440, 1440], [3840, 2160],
+        [1280, 960], [1440, 1080], [1600, 1200], [1920, 1440], [2048, 1536],
     ];
-    if native[0] > 0 { v.push(native); }
-    v.push(current);
+    // keep the saved value selectable only if it is already 4:3 (legacy 16:9 saves
+    // get snapped to a 4:3 default by the frontend instead of being offered here).
+    if current[0] > 0 && current[0] * 3 == current[1] * 4 { v.push(current); }
     v.sort_by(|a, b| (a[0] as u64 * a[1] as u64).cmp(&(b[0] as u64 * b[1] as u64)));
     v.dedup();
     v
@@ -293,14 +298,16 @@ fn load(app: tauri::AppHandle) -> LoadResult {
             read_prefs(&mut settings);
             let resolutions = resolution_list(native, [settings.width, settings.height]);
             LoadResult { found: true, game_dir: Some(dir.to_string_lossy().into()), settings,
-                         native, resolutions, hd_available: hd_available(&dir), gamescope_available: gs }
+                         native, resolutions, hd_available: hd_available(&dir), gamescope_available: gs,
+                         version: env!("CARGO_PKG_VERSION").into() }
         }
         None => {
             let mut settings = Settings::default();
             read_prefs(&mut settings);
             let resolutions = resolution_list(native, [settings.width, settings.height]);
             LoadResult { found: false, game_dir: None, settings, native, resolutions,
-                         hd_available: false, gamescope_available: gs }
+                         hd_available: false, gamescope_available: gs,
+                         version: env!("CARGO_PKG_VERSION").into() }
         }
     }
 }
@@ -381,12 +388,28 @@ fn status(host: String) -> StatusOut {
 // folder — so game-side assets (e.g. BuildingBlocks/zz_uiscale.dll) update without
 // shipping a new zip. Every download is sha256-verified before it's written.
 #[derive(Deserialize)]
-struct ManifestFile { path: String, sha256: String }
+struct ManifestFile { path: String, sha256: String, #[serde(default)] size: u64 }
 #[derive(Deserialize)]
 struct Manifest { files: Vec<ManifestFile> }
 
 #[derive(Serialize, Default)]
 struct SyncOut { ok: bool, checked: u32, updated: Vec<String>, error: Option<String> }
+
+// Progress event payload emitted during `sync` so the UI can show a download bar.
+#[derive(Serialize, Clone)]
+struct SyncProgress { done: u32, total: u32, file: String }
+
+// Read-only "is there anything to update?" check — drives the update modal. Never
+// downloads file bodies: compares the launcher version (release.json) and the game
+// files' sha256 (manifest.json) against what's on disk.
+#[derive(Serialize, Default)]
+struct UpdateCheck {
+    ok: bool,
+    launcher_version: Option<String>, // newer launcher version, if one is published
+    content_files: u32,               // count of game files that differ from the manifest
+    content_bytes: u64,               // total bytes those updated files will download
+    error: Option<String>,
+}
 
 fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
@@ -403,8 +426,23 @@ fn safe_rel(p: &str) -> bool {
         && p.chars().nth(1) != Some(':') // no "C:\…"
 }
 
-#[tauri::command]
-fn sync(host: String) -> SyncOut {
+fn fetch_manifest(agent: &ureq::Agent, host: &str) -> Option<(Manifest, &'static str)> {
+    for scheme in ["https", "http"] {
+        let url = format!("{scheme}://{host}/launcher/manifest.json");
+        if let Ok(resp) = agent.get(&url).call() {
+            if let Ok(m) = resp.into_json::<Manifest>() { return Some((m, scheme)); }
+        }
+    }
+    None
+}
+// A manifest file needs downloading if it's missing locally or its sha256 differs.
+fn file_differs(local: &Path, f: &ManifestFile) -> bool {
+    match fs::read(local) { Ok(cur) => sha256_hex(&cur) != f.sha256, Err(_) => true }
+}
+
+// Core content sync. `on_progress` is called once before the work and after each
+// file so the UI (or nothing, for the CLI path) can render a download bar.
+fn run_sync(host: &str, on_progress: impl Fn(SyncProgress)) -> SyncOut {
     use std::io::Read;
     let host = host.trim().trim_end_matches('/');
     if host.is_empty() { return SyncOut { error: Some("no server set".into()), ..Default::default() }; }
@@ -412,40 +450,78 @@ fn sync(host: String) -> SyncOut {
         Some(d) => d,
         None => return SyncOut { error: Some("game folder not found".into()), ..Default::default() },
     };
-    let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(20)).build();
-    let (manifest, scheme) = {
-        let mut found = None;
-        for scheme in ["https", "http"] {
-            let url = format!("{scheme}://{host}/launcher/manifest.json");
-            if let Ok(resp) = agent.get(&url).call() {
-                if let Ok(m) = resp.into_json::<Manifest>() { found = Some((m, scheme)); break; }
-            }
-        }
-        match found { Some(x) => x, None => return SyncOut { error: Some("update server unreachable".into()), ..Default::default() } }
+    let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(60)).build();
+    let (manifest, scheme) = match fetch_manifest(&agent, host) {
+        Some(x) => x, None => return SyncOut { error: Some("update server unreachable".into()), ..Default::default() },
     };
-    let mut out = SyncOut { ok: true, ..Default::default() };
-    for f in &manifest.files {
-        out.checked += 1;
-        if !safe_rel(&f.path) { continue; }
-        let local = dir.join(&f.path);
-        if let Ok(cur) = fs::read(&local) {
-            if sha256_hex(&cur) == f.sha256 { continue; } // already up to date
-        }
+    // Pass 1: build the work set (files that differ) so the UI gets a real total.
+    let todo: Vec<&ManifestFile> = manifest.files.iter()
+        .filter(|f| safe_rel(&f.path) && file_differs(&dir.join(&f.path), f))
+        .collect();
+    let total = todo.len() as u32;
+    let mut out = SyncOut { ok: true, checked: manifest.files.len() as u32, ..Default::default() };
+    on_progress(SyncProgress { done: 0, total, file: String::new() });
+    // Pass 2: download each, sha256-verify before writing, emit progress per file.
+    for (i, f) in todo.iter().enumerate() {
         let url = format!("{scheme}://{host}/launcher/files/{}", f.path);
         let mut buf = Vec::new();
-        match agent.get(&url).call() {
-            Ok(resp) => { if resp.into_reader().read_to_end(&mut buf).is_err() { continue; } }
-            Err(_) => continue,
+        let mut got = false;
+        if let Ok(resp) = agent.get(&url).call() { got = resp.into_reader().read_to_end(&mut buf).is_ok(); }
+        if got && sha256_hex(&buf) == f.sha256 { // corrupt/tampered → never write
+            let local = dir.join(&f.path);
+            if let Some(parent) = local.parent() { let _ = fs::create_dir_all(parent); }
+            let tmp = local.with_extension("download.tmp");
+            if fs::write(&tmp, &buf).is_ok() && fs::rename(&tmp, &local).is_ok() {
+                out.updated.push(f.path.clone());
+            } else { let _ = fs::remove_file(&tmp); }
         }
-        if sha256_hex(&buf) != f.sha256 { continue; } // corrupt/tampered → never write
-        if let Some(parent) = local.parent() { let _ = fs::create_dir_all(parent); }
-        let tmp = local.with_extension("download.tmp");
-        if fs::write(&tmp, &buf).is_ok() && fs::rename(&tmp, &local).is_ok() {
-            out.updated.push(f.path.clone());
-        } else {
-            let _ = fs::remove_file(&tmp);
+        on_progress(SyncProgress { done: (i + 1) as u32, total, file: f.path.clone() });
+    }
+    out
+}
+
+#[tauri::command]
+fn sync(app: tauri::AppHandle, host: String) -> SyncOut {
+    use tauri::Emitter;
+    run_sync(&host, |p| { let _ = app.emit("sync-progress", p); })
+}
+
+// Relaunch the app — used by the update modal after a launcher self-update so the
+// swapped-in binary takes effect without the user hunting for the .exe.
+#[tauri::command]
+fn restart(app: tauri::AppHandle) { app.restart(); }
+
+#[tauri::command]
+fn check_updates(host: String) -> UpdateCheck {
+    let host = host.trim().trim_end_matches('/');
+    if host.is_empty() { return UpdateCheck { error: Some("no server set".into()), ..Default::default() }; }
+    let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(20)).build();
+    let mut out = UpdateCheck { ok: true, ..Default::default() };
+    let mut reached = false;
+    // launcher self-update available?
+    for scheme in ["https", "http"] {
+        let url = format!("{scheme}://{host}/launcher/release.json");
+        if let Ok(resp) = agent.get(&url).call() {
+            if let Ok(r) = resp.into_json::<Release>() {
+                reached = true;
+                if version_gt(&r.version, env!("CARGO_PKG_VERSION")) { out.launcher_version = Some(r.version); }
+                break;
+            }
         }
     }
+    // game content files that differ from the manifest?
+    if let Some(dir) = resolve_game_dir() {
+        if let Some((manifest, _)) = fetch_manifest(&agent, host) {
+            reached = true;
+            for f in &manifest.files {
+                if safe_rel(&f.path) && file_differs(&dir.join(&f.path), f) {
+                    out.content_files += 1;
+                    out.content_bytes += f.size;
+                }
+            }
+        }
+    }
+    if !reached { out.ok = false; out.error = Some("update server unreachable".into()); }
     out
 }
 
@@ -656,6 +732,83 @@ fn play(settings: Settings, windowed: bool) -> Result<(), String> {
     spawn_game(&dir, &target, s.gamescope, &s.gamescope_args)
 }
 
+// ---- remade menus (Tauri) ---------------------------------------------------
+// The bundled menu UI (faithful HTML recreation of the in-game menus) needs to know
+// where the live textures are (to render them via the asset protocol) and the saved
+// gateway host (so login/data calls hit the right server).
+#[derive(Serialize, Default)]
+struct MenuInit {
+    found: bool,
+    game_dir: Option<String>,
+    textures_dir: Option<String>,
+    host: String,
+}
+#[tauri::command]
+fn menu_init() -> MenuInit {
+    match resolve_game_dir() {
+        Some(dir) => {
+            let tex = dir.join("game").join("Textures");
+            MenuInit {
+                found: true,
+                game_dir: Some(dir.to_string_lossy().into_owned()),
+                textures_dir: Some(tex.to_string_lossy().into_owned()),
+                host: read_settings(&dir).host,
+            }
+        }
+        None => MenuInit::default(),
+    }
+}
+
+// Pull one `key="value"` attribute out of the gateway's tiny XML login reply.
+fn xml_attr(xml: &str, key: &str) -> Option<String> {
+    let needle = format!("{key}=\"");
+    let start = xml.find(&needle)? + needle.len();
+    let rest = &xml[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+#[derive(Serialize, Default)]
+struct LoginOut {
+    ok: bool,
+    screen_name: String,
+    error: Option<String>,
+}
+
+// Faithful login: the engine logs in via POST /common/login/check.jhtml (form
+// screenName+password) → XML `<login loggedIn="true" … screenName="…" />`. The gateway
+// auto-provisions unknown accounts, so a fresh name + password just works. Proxied
+// through Rust (not fetch) to reuse the https→http fallback and dodge webview CORS.
+#[tauri::command]
+fn gw_login(host: String, username: String, password: String) -> LoginOut {
+    let host = host.trim().trim_end_matches('/');
+    let username = username.trim();
+    if host.is_empty() {
+        return LoginOut { error: Some("No server set.".into()), ..Default::default() };
+    }
+    if username.is_empty() {
+        return LoginOut { error: Some("Enter a username.".into()), ..Default::default() };
+    }
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(10)).build();
+    let form = [("screenName", username), ("password", password.as_str())];
+    for scheme in ["https", "http"] {
+        let url = format!("{scheme}://{host}/common/login/check.jhtml");
+        if let Ok(resp) = agent.post(&url).send_form(&form) {
+            if let Ok(body) = resp.into_string() {
+                if body.contains("loggedIn=\"true\"") {
+                    let screen = xml_attr(&body, "screenName")
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| username.to_string());
+                    return LoginOut { ok: true, screen_name: screen, error: None };
+                }
+                return LoginOut { error: Some("Invalid username or password.".into()), ..Default::default() };
+            }
+        }
+    }
+    LoginOut { error: Some("Couldn't reach the server.".into()), ..Default::default() }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Headless patcher: `launcher --sync [host]` runs the content sync and exits
@@ -668,7 +821,7 @@ pub fn run() {
             .or_else(|| resolve_game_dir().map(|d| read_settings(&d).host).filter(|h| !h.is_empty()))
             .unwrap_or_else(|| "gw.legends-awakened.com".to_string());
         eprintln!("syncing against {host} …");
-        let out = sync(host);
+        let out = run_sync(&host, |p| { if p.total > 0 { eprintln!("  {}/{}  {}", p.done, p.total, p.file); } });
         println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
         std::process::exit(if out.ok { 0 } else { 1 });
     }
@@ -686,7 +839,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, self_update, set_textures])
+        // The remade menus load the game's real textures straight from the install
+        // (game/Textures), so the webview can `convertFileSrc()` them. The install dir
+        // is only known at runtime, so allow it here rather than via a static config glob.
+        .setup(|app| {
+            if let Some(dir) = resolve_game_dir() {
+                let tex = dir.join("game").join("Textures");
+                let _ = app.asset_protocol_scope().allow_directory(&tex, true);
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, check_updates, self_update, restart, set_textures, menu_init, gw_login])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

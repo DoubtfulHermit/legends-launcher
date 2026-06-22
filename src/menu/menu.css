@@ -1,0 +1,179 @@
+/* Remade in-game menus — faithful recreation of AvatarMP's 800x600 menu screens,
+   rendered in a fixed logical stage and transform-scaled to fill any window. Lives in
+   the same binary as the launcher; shown only on #/menu routes (body.in-menu). */
+
+/* ---- view toggle: launcher vs menu ---------------------------------------- */
+#menu-view { display: none; }
+body.in-menu #menu-view { display: block; }
+/* hide the launcher chrome + ambient bg while the menu owns the window */
+body.in-menu .chrome,
+body.in-menu .app,
+body.in-menu .bg { display: none !important; }
+
+/* ---- the scalable stage --------------------------------------------------- */
+/* black letterbox behind the 4:3 stage */
+#menu-view {
+  position: fixed;
+  inset: 0;
+  background: #05080c;
+  overflow: hidden;
+  z-index: 50;
+}
+.mnu-stage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 800px;   /* the game's logical UI space — never changes */
+  height: 600px;
+  transform-origin: center center;
+  transform: translate(-50%, -50%) scale(1);
+  overflow: hidden;
+  background: #000;
+  /* keep edges crisp when scaled up */
+  image-rendering: auto;
+  user-select: none;
+}
+
+/* full-bleed background art for a screen */
+.mnu-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+/* absolutely-positioned layer (logo, panels, button columns) in stage space */
+.mnu-layer { position: absolute; }
+
+/* a centered vertical button column placed over the open (right) area */
+.mnu-col {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+/* ---- faithful texture buttons (states: _1 normal / _2 hover / _3 press) ---- */
+.mnu-btn {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: none;
+  cursor: pointer;
+  line-height: 0;
+  display: inline-block;
+  filter: drop-shadow(0 3px 7px rgba(0, 0, 0, 0.55));
+  transition: transform 0.07s ease, filter 0.1s ease;
+}
+.mnu-btn:focus-visible { outline: 2px solid #ffd36b; outline-offset: 3px; }
+.mnu-btn:active { transform: translateY(1px); }
+.mnu-btn img { display: block; width: 100%; height: auto; }
+
+/* ---- login panel ---------------------------------------------------------- */
+.mnu-login {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+.mnu-login-panel { display: block; pointer-events: none; }
+/* inputs overlaid on the panel's dark boxes (positioned as % of the panel) */
+.mnu-input {
+  position: absolute;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: #ffe9b0;
+  font-family: "Cinzel", Georgia, serif;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 0 6px;
+  margin: 0;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+.mnu-input::placeholder { color: rgba(255, 233, 176, 0.35); }
+/* caret-only focus cue — the texture already draws the field frame */
+.mnu-input:focus { background: rgba(255, 211, 107, 0.06); }
+.mnu-login-err {
+  position: absolute;
+  left: 0; right: 0;
+  text-align: center;
+  color: #ff7d6b;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 13px;
+  text-shadow: 0 1px 2px #000;
+  min-height: 16px;
+}
+
+/* ---- menu controls (back / fullscreen) ------------------------------------ */
+.mnu-controls {
+  position: fixed;
+  top: 10px;
+  right: 12px;
+  display: flex;
+  gap: 8px;
+  z-index: 60;
+}
+.mnu-ctl {
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 211, 107, 0.3);
+  border-radius: 7px;
+  background: rgba(8, 12, 18, 0.55);
+  color: #ffd36b;
+  font-size: 15px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  backdrop-filter: blur(6px);
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.mnu-ctl:hover { background: rgba(255, 211, 107, 0.16); border-color: rgba(255, 211, 107, 0.6); }
+
+/* ---- toast ---------------------------------------------------------------- */
+.mnu-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%) translateY(12px);
+  background: rgba(8, 12, 18, 0.92);
+  color: #f3e7c8;
+  border: 1px solid rgba(255, 211, 107, 0.35);
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 14px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 60;
+}
+.mnu-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.mnu-toast.err { border-color: rgba(255, 125, 107, 0.6); color: #ffd2cb; }
+
+/* ---- launcher-side entry button (injected) -------------------------------- */
+.mnu-enter {
+  position: fixed;
+  left: 14px;
+  bottom: 12px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border: 1px solid rgba(255, 211, 107, 0.35);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 211, 107, 0.14), rgba(255, 211, 107, 0.05));
+  color: #ffd884;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: border-color 0.12s ease, transform 0.12s ease, background 0.12s ease;
+}
+.mnu-enter:hover { border-color: rgba(255, 211, 107, 0.7); transform: translateY(-1px); }
+body.in-menu .mnu-enter { display: none; }
