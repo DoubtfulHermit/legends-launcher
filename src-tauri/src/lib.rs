@@ -651,7 +651,8 @@ fn gamescope_available() -> bool {
 // `gamescope`/`gamescope_args` come from the launcher's Display toggle (Linux only).
 // Env vars (AVATAR_GAMESCOPE / AVATAR_GAMESCOPE_ARGS / AVATAR_VK_ICD) still override.
 #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
-fn spawn_game(dir: &Path, exe_path: &Path, gamescope: bool, gamescope_args: &str) -> Result<(), String> {
+fn spawn_game(dir: &Path, exe_path: &Path, gamescope: bool, gamescope_args: &str,
+              width: u32, height: u32, fullscreen: bool) -> Result<(), String> {
     use std::process::Command;
     #[cfg(target_os = "windows")]
     {
@@ -685,18 +686,37 @@ fn spawn_game(dir: &Path, exe_path: &Path, gamescope: bool, gamescope_args: &str
                 if !on_path("gamescope") {
                     return Err("Gamescope is enabled but isn't installed (not on PATH).".into());
                 }
-                let mut cmd = Command::new("gamescope");
+                // Run via `setsid` so gamescope gets its OWN session, detached from the
+                // launcher. Otherwise gamescope's reaper sees its parent (the launcher)
+                // exit and kills the game — so closing/crashing the launcher (or the
+                // launcher being killed) takes the running match down with it.
+                let mut cmd = Command::new("setsid");
+                cmd.arg("gamescope");
                 cmd.current_dir(dir);
                 if let Some(p) = &prefix { cmd.env("WINEPREFIX", p); }
                 if let Ok(icd) = std::env::var("AVATAR_VK_ICD") { cmd.env("VK_ICD_FILENAMES", icd); }
-                // Args from the toggle's field; fall back to the env override.
-                let args = if !gamescope_args.trim().is_empty() {
+                // Args from the toggle's field, then the env override, else AUTO:
+                // render the game at its (4:3) resolution with -w/-h and let gamescope
+                // upscale + CENTER it on the display (-W/-H native); --force-grab-cursor
+                // keeps the pointer mapped to the game surface. Without -w/-h gamescope
+                // can't size the nested display and the game lands tiny/top-left — which
+                // is exactly the wine fullscreen bug we're working around.
+                let explicit = if !gamescope_args.trim().is_empty() {
                     gamescope_args.to_string()
                 } else {
                     std::env::var("AVATAR_GAMESCOPE_ARGS").unwrap_or_default()
                 };
+                let args = if !explicit.trim().is_empty() {
+                    explicit
+                } else {
+                    // Only the game's render size. gamescope auto-detects the output
+                    // monitor and fits 4:3 with aspect preserved (pillarbox) — pinning a
+                    // guessed -W/-H stretched the picture (the splash looked squashed).
+                    format!("-w {} -h {} --force-grab-cursor", width.max(640), height.max(480))
+                };
                 cmd.args(args.split_whitespace());
-                cmd.arg("-f").arg("--").arg("wine").arg(exe_path);
+                if fullscreen { cmd.arg("-f"); }   // honour the Fullscreen toggle, not always
+                cmd.arg("--").arg("wine").arg(exe_path);
                 cmd.spawn().map_err(|e| format!("launch via gamescope: {e}"))?;
                 return Ok(());
             }
@@ -717,9 +737,15 @@ fn play(settings: Settings, windowed: bool) -> Result<(), String> {
     // The ⊡ Windowed button forces a window regardless of the Fullscreen toggle.
     let mut s = settings;
     if windowed { s.fullscreen = false; }
+    write_prefs(&s);   // save the user's real toggles (gamescope/args) before overrides
+    // The user's real fullscreen intent (Fullscreen toggle, minus the ⊡ Windowed button).
+    // It drives whether gamescope gets -f; the game itself always runs WINDOWED inside
+    // gamescope (that's what gives a centered, clickable game on Wayland — wine's own
+    // exclusive fullscreen renders tiny/top-left and breaks the cursor).
+    let want_fullscreen = s.fullscreen;
+    if s.gamescope { s.fullscreen = false; }
     write_config(&dir, &s)?;
     write_arena(&dir, &s)?;
-    write_prefs(&s);
     // Safety net: make sure the live textures match the toggle (normally a no-op —
     // set_textures already applied it when the toggle was flipped).
     apply_textures(&dir, s.hd_textures)?;
@@ -729,7 +755,7 @@ fn play(settings: Settings, windowed: bool) -> Result<(), String> {
     // Config.ini (hardcoded 800x600 top-left), so only use it as a last-resort fallback.
     let windowed_exe = dir.join("AvatarMP_Windowed.exe");
     let target = if windowed_exe.is_file() { windowed_exe } else { dir.join("AvatarMP.exe") };
-    spawn_game(&dir, &target, s.gamescope, &s.gamescope_args)
+    spawn_game(&dir, &target, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen)
 }
 
 // ---- remade menus (Tauri) ---------------------------------------------------
