@@ -393,7 +393,7 @@ struct ManifestFile { path: String, sha256: String, #[serde(default)] size: u64 
 struct Manifest { files: Vec<ManifestFile> }
 
 #[derive(Serialize, Default)]
-struct SyncOut { ok: bool, checked: u32, updated: Vec<String>, error: Option<String> }
+struct SyncOut { ok: bool, checked: u32, updated: Vec<String>, failed: Vec<String>, error: Option<String> }
 
 // Progress event payload emitted during `sync` so the UI can show a download bar.
 #[derive(Serialize, Clone)]
@@ -473,9 +473,21 @@ fn run_sync(host: &str, on_progress: impl Fn(SyncProgress)) -> SyncOut {
             let tmp = local.with_extension("download.tmp");
             if fs::write(&tmp, &buf).is_ok() && fs::rename(&tmp, &local).is_ok() {
                 out.updated.push(f.path.clone());
-            } else { let _ = fs::remove_file(&tmp); }
+            } else {
+                // download was fine but we couldn't WRITE it — locked (game running),
+                // read-only, or a permission-protected folder (Program Files). Report it
+                // so the UI can tell the user instead of silently doing nothing.
+                let _ = fs::remove_file(&tmp);
+                out.failed.push(f.path.clone());
+            }
+        } else if !got {
+            out.failed.push(f.path.clone());  // download failed (network)
         }
         on_progress(SyncProgress { done: (i + 1) as u32, total, file: f.path.clone() });
+    }
+    if !out.failed.is_empty() && out.updated.is_empty() {
+        out.error = Some("Couldn't write game files — close the game and make sure the \
+            folder isn't read-only (avoid Program Files, or run as administrator).".into());
     }
     out
 }
@@ -486,19 +498,31 @@ fn sync(app: tauri::AppHandle, host: String) -> SyncOut {
     run_sync(&host, |p| { let _ = app.emit("sync-progress", p); })
 }
 
-// Relaunch the app — used by the update modal after a launcher self-update so the
-// swapped-in binary takes effect without the user hunting for the .exe.
+// Relaunch the app (kept for callers; no longer used by the update flow).
 #[tauri::command]
 fn restart(app: tauri::AppHandle) { app.restart(); }
 
+// Open a URL in the user's browser — the update modal's "Download" button uses this
+// to send the user to the download page instead of self-modifying the running exe.
+#[tauri::command]
+fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+}
+
+// Version-only check. NO self-update, NO content patcher — the launcher never
+// modifies itself or game files (that self-modifying-exe path silently failed on
+// Windows). If the gateway advertises a newer version, the UI just prompts the user
+// to DOWNLOAD it manually (opens the download page). Reliable, no SmartScreen/lock
+// surprises.
 #[tauri::command]
 fn check_updates(host: String) -> UpdateCheck {
     let host = host.trim().trim_end_matches('/');
     if host.is_empty() { return UpdateCheck { error: Some("no server set".into()), ..Default::default() }; }
-    let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(20)).build();
+    let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(15)).build();
     let mut out = UpdateCheck { ok: true, ..Default::default() };
     let mut reached = false;
-    // launcher self-update available?
+    // launcher binary: newer version published? (prompts a manual DOWNLOAD, not a swap)
     for scheme in ["https", "http"] {
         let url = format!("{scheme}://{host}/launcher/release.json");
         if let Ok(resp) = agent.get(&url).call() {
@@ -509,7 +533,8 @@ fn check_updates(host: String) -> UpdateCheck {
             }
         }
     }
-    // game content files that differ from the manifest?
+    // game content (DLLs/textures): how many files differ from the manifest? The launcher
+    // CAN safely patch these (unlike its own running exe) — but only with the user's OK.
     if let Some(dir) = resolve_game_dir() {
         if let Some((manifest, _)) = fetch_manifest(&agent, host) {
             reached = true;
@@ -879,7 +904,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, check_updates, self_update, restart, set_textures, menu_init, gw_login])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, check_updates, self_update, restart, open_url, set_textures, menu_init, gw_login])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
