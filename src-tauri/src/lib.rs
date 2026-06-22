@@ -712,10 +712,14 @@ fn spawn_game(dir: &Path, exe_path: &Path, gamescope: bool, gamescope_args: &str
                     // Only the game's render size. gamescope auto-detects the output
                     // monitor and fits 4:3 with aspect preserved (pillarbox) — pinning a
                     // guessed -W/-H stretched the picture (the splash looked squashed).
-                    format!("-w {} -h {} --force-grab-cursor", width.max(640), height.max(480))
+                    // NO --force-grab-cursor: it warps the pointer every frame, which
+                    // makes the game's mouse-look spin wildly (uncontrollable camera).
+                    format!("-w {} -h {} -S fit", width.max(640), height.max(480))
                 };
                 cmd.args(args.split_whitespace());
-                if fullscreen { cmd.arg("-f"); }   // honour the Fullscreen toggle, not always
+                // Fullscreen -> -f. Windowed -> -b (borderless) so the host window's title
+                // bar doesn't push the view up and clip the bottom of the HUD.
+                cmd.arg(if fullscreen { "-f" } else { "-b" });
                 cmd.arg("--").arg("wine").arg(exe_path);
                 cmd.spawn().map_err(|e| format!("launch via gamescope: {e}"))?;
                 return Ok(());
