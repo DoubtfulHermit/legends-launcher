@@ -136,6 +136,13 @@ fn write_quickmatch(dir: &Path, enabled: bool) {
     let _ = fs::write(&p, out);
 }
 
+// Seamless-login creds for the game: a sidecar the DLL reads ONCE then deletes. Holds the
+// launcher's username + a single-use gateway ticket — never the password. Written fresh per
+// launch when Skip-menus is on and the player is logged in; cleared otherwise so a stale
+// ticket never lingers.
+fn quickmatch_creds(dir: &Path) -> PathBuf { dir.join("BuildingBlocks").join("zz_quickmatch.creds") }
+fn clear_game_creds(dir: &Path) { let _ = fs::remove_file(quickmatch_creds(dir)); }
+
 // ---- INI helpers (line-preserving) ------------------------------------------
 fn arena_ini(dir: &Path) -> PathBuf { dir.join("BuildingBlocks").join("arena_link.ini") }
 
@@ -204,7 +211,7 @@ fn write_config(dir: &Path, s: &Settings) -> Result<(), String> {
 
 // Update [server] host and [room] code/queue in arena_link.ini, creating the
 // file/sections/keys if missing.
-fn write_arena(dir: &Path, s: &Settings) -> Result<(), String> {
+fn write_arena(dir: &Path, s: &Settings, ticket: Option<&str>) -> Result<(), String> {
     let path = arena_ini(dir);
     if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
     let src = fs::read_to_string(&path).unwrap_or_default();
@@ -239,6 +246,10 @@ fn write_arena(dir: &Path, s: &Settings) -> Result<(), String> {
     set(&mut lines, "server", "host", &s.host);
     set(&mut lines, "room", "code", &s.room);
     set(&mut lines, "room", "queue", &s.queue.to_string());
+    // [player] ticket: the launcher's authenticated identity token (HMAC, short-lived) — arena_link
+    // forwards it to the game server so the match loads this account's real character. Some("")
+    // clears it (no stale token); None leaves it untouched (e.g. plain settings save).
+    if let Some(v) = ticket { set(&mut lines, "player", "ticket", v); }
     let mut body = lines.join("\n");
     body.push('\n');
     fs::write(&path, body).map_err(|e| format!("write arena_link.ini: {e}"))
@@ -361,7 +372,7 @@ async fn set_textures(hd: bool) -> Result<(), String> {
 fn save(settings: Settings) -> Result<(), String> {
     let dir = resolve_game_dir().ok_or("game folder not found")?;
     write_config(&dir, &settings)?;
-    write_arena(&dir, &settings)?;
+    write_arena(&dir, &settings, None)?;   // leave any [player] ticket untouched
     write_prefs(&settings);
     Ok(())
 }
@@ -791,7 +802,7 @@ fn spawn_game(dir: &Path, exe_path: &Path, gamescope: bool, gamescope_args: &str
 }
 
 #[tauri::command]
-fn play(settings: Settings, windowed: bool) -> Result<(), String> {
+fn play(settings: Settings, windowed: bool, username: Option<String>, ticket: Option<String>) -> Result<(), String> {
     let dir = resolve_game_dir().ok_or("game folder not found")?;
     // The ⊡ Windowed button forces a window regardless of the Fullscreen toggle.
     let mut s = settings;
@@ -804,8 +815,14 @@ fn play(settings: Settings, windowed: bool) -> Result<(), String> {
     let want_fullscreen = s.fullscreen;
     if s.gamescope { s.fullscreen = false; }
     write_config(&dir, &s)?;
-    write_arena(&dir, &s)?;
+    // Identity: when skipping menus AND logged in, pass the launcher's auth ticket to arena_link
+    // (it forwards it to the game server, which loads this account's real character). Otherwise
+    // no ticket → the match uses the default character.
+    let tk = if s.skip_menu { ticket.as_deref().unwrap_or("") } else { "" };
+    write_arena(&dir, &s, Some(tk))?;      // set on skip+login, else clear (Some("")) so none lingers
     write_quickmatch(&dir, s.skip_menu);   // Skip menus → straight into the arena queue
+    let _ = username;                      // the username is embedded in (and verified from) the ticket
+    clear_game_creds(&dir);                // legacy in-game-autologin creds path is retired
     // Safety net: make sure the live textures match the toggle (normally a no-op —
     // set_textures already applied it when the toggle was flipped).
     apply_textures(&dir, s.hd_textures)?;
@@ -895,6 +912,53 @@ fn gw_login(host: String, username: String, password: String) -> LoginOut {
     LoginOut { error: Some("Couldn't reach the server.".into()), ..Default::default() }
 }
 
+// pull a simple "key":"value" string out of a flat JSON body (our fields have no escaping).
+fn json_str_field(body: &str, key: &str) -> Option<String> {
+    let pat = format!("\"{key}\"");
+    let after = &body[body.find(&pat)? + pat.len()..];
+    let after = after[after.find(':')? + 1..].trim_start();
+    let inner = after.strip_prefix('"')?;
+    Some(inner[..inner.find('"')?].to_string())
+}
+
+#[derive(Serialize, Default)]
+struct TicketOut {
+    ok: bool,
+    ticket: String,
+    error: Option<String>,
+}
+
+// Seamless hand-off: trade the (in-memory) login for a short-lived single-use ticket from the
+// gateway (POST /launcher/ticket). The launcher writes username + THIS ticket for the game —
+// never the password. The game logs in with it; the gateway consumes it once.
+#[tauri::command]
+fn gw_ticket(host: String, username: String, password: String) -> TicketOut {
+    let host = host.trim().trim_end_matches('/');
+    if host.is_empty() || username.trim().is_empty() {
+        return TicketOut { error: Some("Not logged in.".into()), ..Default::default() };
+    }
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(10)).build();
+    let form = [("screenName", username.trim()), ("password", password.as_str())];
+    for scheme in ["https", "http"] {
+        let url = format!("{scheme}://{host}/launcher/ticket");
+        match agent.post(&url).send_form(&form) {
+            Ok(resp) | Err(ureq::Error::Status(_, resp)) => {
+                if let Ok(body) = resp.into_string() {
+                    if let Some(t) = json_str_field(&body, "ticket").filter(|s| !s.is_empty()) {
+                        return TicketOut { ok: true, ticket: t, error: None };
+                    }
+                    return TicketOut {
+                        error: Some(json_str_field(&body, "error").unwrap_or_else(|| "Ticket denied.".into())),
+                        ..Default::default() };
+                }
+            }
+            Err(_) => continue, // transport error → try the other scheme
+        }
+    }
+    TicketOut { error: Some("Couldn't reach the server.".into()), ..Default::default() }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Headless patcher: `launcher --sync [host]` runs the content sync and exits
@@ -935,7 +999,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, check_updates, self_update, restart, open_url, set_textures, menu_init, gw_login])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, check_updates, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

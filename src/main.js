@@ -92,7 +92,9 @@ async function doLogin() {
   try {
     const r = await invoke('gw_login', { host, username, password });
     if (r && r.ok) {
-      state.session = { screenName: r.screen_name || username };
+      // keep the password in memory only (never written to disk) so PLAY can mint a one-time
+      // ticket for the game's seamless login.
+      state.session = { screenName: r.screen_name || username, password };
       pill.textContent = '✓ ' + state.session.screenName;
       pill.className = 'login-pill ok'; pill.hidden = false;
       toast('Logged in as ' + state.session.screenName, 'ok');
@@ -198,10 +200,25 @@ function toast(msg, kind) {
 
 async function play(windowed) {
   const settings = gather();
+  // Seamless identity: when skipping menus, mint a one-time ticket from our logged-in session so
+  // the game logs in as the real account (loads that character). Password never leaves memory.
+  let username = null, ticket = null;
+  if (settings.skip_menu) {
+    if (state.session && state.session.screenName) {
+      const host = ($('host').value || '').trim() || DEFAULT_HOST;
+      try {
+        const r = await invoke('gw_ticket', { host, username: state.session.screenName, password: state.session.password || '' });
+        if (r && r.ok && r.ticket) { username = state.session.screenName; ticket = r.ticket; }
+        else { toast('Could not get a login ticket — using default character.', 'err'); }
+      } catch (e) { toast('Ticket error: ' + e, 'err'); }
+    } else {
+      toast('Not logged in — the match will use the default character.', 'err');
+    }
+  }
   $('play').disabled = true; $('playWin').disabled = true;
   $('play').querySelector('.play-label').textContent = 'LAUNCHING…';
   try {
-    await invoke('play', { settings, windowed });
+    await invoke('play', { settings, windowed, username, ticket });
     toast('Entering the arena…', 'ok');
     const win = getWin();
     setTimeout(() => { if (win) win.close(); }, 900);
