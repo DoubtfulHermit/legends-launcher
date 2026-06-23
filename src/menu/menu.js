@@ -189,6 +189,20 @@
     const err = document.createElement('div');
     err.className = 'mnu-login-err';
 
+    // TEST-ONLY: a "skip login" toggle. When ticked (and both fields are filled), bypass the
+    // gateway and go straight in with the typed name. Choice persists across launches. We'll
+    // harden auth later — this just speeds up testing the queue/match flow.
+    const skipRow = document.createElement('label');
+    skipRow.className = 'mnu-skip';
+    const skip = document.createElement('input');
+    skip.type = 'checkbox';
+    skip.checked = localStorage.getItem('mnu_skip_login') === '1';
+    skip.addEventListener('change', () => localStorage.setItem('mnu_skip_login', skip.checked ? '1' : '0'));
+    const skipTxt = document.createElement('span');
+    skipTxt.textContent = 'Skip login (testing)';
+    skipRow.appendChild(skip);
+    skipRow.appendChild(skipTxt);
+
     // size the panel + place the inputs over its dark boxes once the texture is known
     panel.onload = () => {
       const w = panel.naturalWidth / state.texScale;
@@ -206,6 +220,7 @@
       place(name, 0.235, 0.085);
       place(pass, 0.375, 0.085);
       err.style.top = 0.86 * h + 'px';
+      skipRow.style.top = (h + 40) + 'px';   // hung below the action buttons
     };
 
     const submit = makeButton('tex_btn_log_submit', doLogin);
@@ -232,6 +247,14 @@
       const username = (name.value || '').trim();
       const password = pass.value || '';
       if (!username) { err.textContent = 'Enter a name.'; name.focus(); return; }
+      // TEST BYPASS: skip the gateway when the box is ticked and both fields are filled.
+      if (skip.checked) {
+        if (!password) { err.textContent = 'Skip needs a password too.'; pass.focus(); return; }
+        state.session = { screenName: username, skipped: true };
+        toast('Skipped login — ' + username + ' (testing)');
+        go('#/menu/main');
+        return;
+      }
       submit.style.pointerEvents = 'none';
       try {
         const r = await invoke('gw_login', { host, username, password });
@@ -254,6 +277,7 @@
     wrap.appendChild(name);
     wrap.appendChild(pass);
     wrap.appendChild(err);
+    wrap.appendChild(skipRow);
     wrap.appendChild(actions);
     stage.appendChild(wrap);
     setTimeout(() => name.focus(), 30);

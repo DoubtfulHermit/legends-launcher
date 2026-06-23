@@ -21,12 +21,14 @@ struct Settings {
     gamescope: bool,        // Linux: wrap the game launch in gamescope
     #[serde(default)]
     gamescope_args: String, // extra gamescope args (GPU/output, e.g. "--prefer-vk-device 1002:1638 -W 1920 -H 1080")
+    #[serde(default)]
+    skip_menu: bool,        // PLAY straight into the arena queue (toggles BuildingBlocks/zz_quickmatch.ini enabled)
 }
 impl Default for Settings {
     fn default() -> Self {
         Settings { host: String::new(), room: String::new(), queue: 4,
                    fullscreen: true, width: 1440, height: 1080, hd_textures: false,
-                   gamescope: false, gamescope_args: String::new() }
+                   gamescope: false, gamescope_args: String::new(), skip_menu: false }
     }
 }
 
@@ -92,6 +94,7 @@ fn read_prefs(s: &mut Settings) {
                 match k.trim() {
                     "gamescope" => s.gamescope = v.trim() == "1" || v.trim().eq_ignore_ascii_case("true"),
                     "gamescope_args" => s.gamescope_args = v.trim().to_string(),
+                    "skip_menu" => s.skip_menu = v.trim() == "1" || v.trim().eq_ignore_ascii_case("true"),
                     _ => {}
                 }
             }
@@ -101,9 +104,36 @@ fn read_prefs(s: &mut Settings) {
 fn write_prefs(s: &Settings) {
     if let Some(p) = prefs_path() {
         if let Some(parent) = p.parent() { let _ = fs::create_dir_all(parent); }
-        let _ = fs::write(p, format!("gamescope={}\ngamescope_args={}\n",
-            if s.gamescope { 1 } else { 0 }, s.gamescope_args));
+        let _ = fs::write(p, format!("gamescope={}\ngamescope_args={}\nskip_menu={}\n",
+            if s.gamescope { 1 } else { 0 }, s.gamescope_args, if s.skip_menu { 1 } else { 0 }));
     }
+}
+
+// The quickmatch DLL (always present in BuildingBlocks) reads `enabled` from its own ini:
+// 1 = on PLAY it fires the arena (AutoMatch) queue straight from a fresh menu — no menu
+// navigation — so the player lands in queue; 0 = leave the normal menus. The launcher's
+// "Skip menus → queue" toggle flips this just before each launch. No-op if the ini is absent.
+fn quickmatch_ini(dir: &Path) -> PathBuf { dir.join("BuildingBlocks").join("zz_quickmatch.ini") }
+fn write_quickmatch(dir: &Path, enabled: bool) {
+    let p = quickmatch_ini(dir);
+    let Ok(txt) = fs::read_to_string(&p) else { return; }; // DLL/ini not installed → nothing to toggle
+    let mut out = String::with_capacity(txt.len() + 16);
+    let mut done = false;
+    for line in txt.lines() {
+        if !done {
+            if let Some((k, _)) = line.split_once('=') {
+                if k.trim() == "enabled" {
+                    out.push_str(&format!("enabled = {}\n", if enabled { 1 } else { 0 }));
+                    done = true;
+                    continue;
+                }
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !done { out.push_str(&format!("enabled = {}\n", if enabled { 1 } else { 0 })); }
+    let _ = fs::write(&p, out);
 }
 
 // ---- INI helpers (line-preserving) ------------------------------------------
@@ -775,6 +805,7 @@ fn play(settings: Settings, windowed: bool) -> Result<(), String> {
     if s.gamescope { s.fullscreen = false; }
     write_config(&dir, &s)?;
     write_arena(&dir, &s)?;
+    write_quickmatch(&dir, s.skip_menu);   // Skip menus → straight into the arena queue
     // Safety net: make sure the live textures match the toggle (normally a no-op —
     // set_textures already applied it when the toggle was flipped).
     apply_textures(&dir, s.hd_textures)?;

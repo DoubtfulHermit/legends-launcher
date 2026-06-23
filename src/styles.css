@@ -161,6 +161,20 @@ body {
 .field input::placeholder { color: var(--smoke); }
 .field input:focus { border-color: rgba(var(--fire-rgb), .55); box-shadow: 0 0 0 3px rgba(var(--fire-rgb), .12); }
 
+/* account / login row */
+.login-row { display: flex; gap: 8px; align-items: stretch; }
+.login-row input { flex: 1 1 0; min-width: 0; }
+.login-btn {
+  flex: 0 0 auto; font: inherit; font-size: 13px; font-weight: 600; color: var(--smoke);
+  background: var(--void); border: 1px solid var(--panel-line); border-radius: 8px;
+  padding: 0 16px; cursor: pointer; transition: color .18s, border-color .18s;
+}
+.login-btn:hover { color: var(--bone); border-color: rgba(var(--fire-rgb), .4); }
+.login-btn:disabled { color: var(--smoke); cursor: default; }
+.login-pill { font-style: normal; font-weight: 600; letter-spacing: .02em; text-transform: none; margin-left: 6px; }
+.login-pill.ok { color: var(--fire-soft); }
+.login-pill.err { color: rgba(200, 90, 70, .9); }
+
 /* segmented queue */
 .seg { position: relative; display: grid; grid-template-columns: repeat(3, 1fr);
   background: var(--void); border: 1px solid var(--panel-line); border-radius: 9px; padding: 4px; }
@@ -188,6 +202,9 @@ body {
 .toggle.on { color: var(--bone); border-color: rgba(var(--fire-rgb), .4); }
 .toggle.on .toggle-track { background: rgba(var(--fire-rgb), .35); }
 .toggle.on .toggle-dot { transform: translateX(15px); background: var(--fire-soft); box-shadow: 0 0 10px var(--fire); }
+/* skip-menu toggle: full-width row + hint, so PLAY's behaviour is obvious */
+.skip-toggle { width: 100%; }
+.skip-hint { font-style: normal; font-weight: 500; font-size: 11px; color: var(--smoke); margin-left: auto; }
 .select-wrap { position: relative; flex: 1; }
 .select-wrap select {
   -webkit-appearance: none; appearance: none; width: 100%; font: inherit; font-size: 13px; color: var(--bone);

@@ -5,7 +5,7 @@ const getWin = () => (TAURI.window && TAURI.window.getCurrentWindow) ? TAURI.win
 
 const $ = (id) => document.getElementById(id);
 const DEFAULT_HOST = 'gw.legends-awakened.com'; // official gateway; used when none is saved
-let state = { host: '', room: '', queue: 4, fullscreen: true, width: 1440, height: 1080, hd_textures: false, gamescope: false, gamescope_args: '' };
+let state = { host: '', room: '', queue: 4, fullscreen: true, width: 1440, height: 1080, hd_textures: false, gamescope: false, gamescope_args: '', skip_menu: false, session: null };
 let native = [0, 0];
 let resolutions = [];
 let hdAvailable = false;
@@ -71,6 +71,44 @@ function setGs(on) {
   $('gsArgs').hidden = !on; // only show the args field when gamescope is enabled
 }
 function toggleGs() { if (gsAvailable) setGs(!state.gamescope); }
+
+// Skip menus → on PLAY the game fires the arena queue straight from a fresh menu (the
+// quickmatch DLL). Remembered across launches (persisted via prefs in gather()/play).
+function setSkipMenu(on) {
+  state.skip_menu = on;
+  $('skipMenu').classList.toggle('on', on);
+}
+
+// Login on the live launcher — informational for now (PLAY works without it); the gateway
+// auto-provisions a fresh name + password. We'll feed this identity into the match later.
+async function doLogin() {
+  const host = ($('host').value || '').trim() || DEFAULT_HOST;
+  const username = ($('user').value || '').trim();
+  const password = $('pass').value || '';
+  const pill = $('loginPill');
+  if (!username) { toast('Enter a username.', 'err'); $('user').focus(); return; }
+  const btn = $('login');
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const r = await invoke('gw_login', { host, username, password });
+    if (r && r.ok) {
+      state.session = { screenName: r.screen_name || username };
+      pill.textContent = '✓ ' + state.session.screenName;
+      pill.className = 'login-pill ok'; pill.hidden = false;
+      toast('Logged in as ' + state.session.screenName, 'ok');
+    } else {
+      pill.textContent = '✕ not logged in';
+      pill.className = 'login-pill err'; pill.hidden = false;
+      toast((r && r.error) || 'Login failed.', 'err');
+    }
+  } catch (e) {
+    pill.textContent = '✕ not logged in';
+    pill.className = 'login-pill err'; pill.hidden = false;
+    toast(String(e), 'err');
+  }
+  btn.disabled = false; btn.textContent = 'Login';
+}
+
 function buildResolutions() {
   const sel = $('res');
   sel.innerHTML = '';
@@ -122,6 +160,7 @@ async function refresh() {
   gsAvailable = !!r.gamescope_available;
   $('gs').hidden = !gsAvailable;
   if (gsAvailable) { $('gsArgs').value = state.gamescope_args || ''; setGs(!!state.gamescope); }
+  setSkipMenu(!!state.skip_menu);
   buildResolutions();
   renderLaunchAs();
   if (found) {
@@ -147,7 +186,8 @@ function gather() {
   return { host: $('host').value.trim(), room: $('room').value.trim(), queue: state.queue,
            fullscreen: state.fullscreen, width: w || state.width, height: h || state.height,
            hd_textures: state.hd_textures,
-           gamescope: state.gamescope, gamescope_args: ($('gsArgs').value || '').trim() };
+           gamescope: state.gamescope, gamescope_args: ($('gsArgs').value || '').trim(),
+           skip_menu: state.skip_menu };
 }
 
 let toastTimer;
@@ -316,6 +356,10 @@ window.addEventListener('DOMContentLoaded', () => {
   $('gsArgs').addEventListener('input', () => { state.gamescope_args = $('gsArgs').value; });
   $('res').addEventListener('change', () => { const [w, h] = $('res').value.split('x').map(Number); state.width = w; state.height = h; renderLaunchAs(); });
   $('host').addEventListener('input', () => { clearTimeout(statusDebounce); statusDebounce = setTimeout(pollStatus, 800); });
+  $('skipMenu').addEventListener('click', () => setSkipMenu(!state.skip_menu));
+  $('login').addEventListener('click', doLogin);
+  $('pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+  $('user').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('pass').focus(); });
   $('play').addEventListener('click', () => play(false));
   $('playWin').addEventListener('click', () => play(true));
   const win = getWin();

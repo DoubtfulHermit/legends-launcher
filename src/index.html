@@ -62,6 +62,15 @@
     <!-- right: controls -->
     <section class="panel">
       <div class="field">
+        <label>Account <i class="login-pill" id="loginPill" hidden></i></label>
+        <div class="login-row">
+          <input id="user" type="text" spellcheck="false" autocomplete="off" placeholder="username" />
+          <input id="pass" type="password" autocomplete="off" placeholder="password" />
+          <button type="button" class="login-btn" id="login">Login</button>
+        </div>
+      </div>
+
+      <div class="field">
         <label>Server</label>
         <input id="host" type="text" spellcheck="false" autocomplete="off" placeholder="gw.legends-awakened.com" />
       </div>
@@ -101,6 +110,13 @@
         </button>
         <input id="gsArgs" class="gs-args" type="text" spellcheck="false" autocomplete="off"
                placeholder="-W 1920 -H 1080   (hybrid GPU? add --prefer-vk-device 1002:1638)" hidden />
+      </div>
+
+      <div class="field">
+        <button type="button" class="toggle skip-toggle" id="skipMenu">
+          <span class="toggle-track"><span class="toggle-dot"></span></span>
+          <b>Skip menus → queue</b><i class="skip-hint">straight into matchmaking on PLAY</i>
+        </button>
       </div>
 
       <div class="actions">

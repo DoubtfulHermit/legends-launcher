@@ -107,6 +107,24 @@ body.in-menu .bg { display: none !important; }
   text-shadow: 0 1px 2px #000;
   min-height: 16px;
 }
+/* TEST-ONLY: skip-login toggle, hung under the login panel */
+.mnu-skip {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  color: rgba(255, 233, 176, 0.72);
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-shadow: 0 1px 2px #000;
+  cursor: pointer;
+  user-select: none;
+}
+.mnu-skip input { accent-color: #ffd36b; cursor: pointer; margin: 0; width: 14px; height: 14px; }
 
 /* ---- menu controls (back / fullscreen) ------------------------------------ */
 .mnu-controls {

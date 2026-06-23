@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Legends Awakened Launcher",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "identifier": "com.legendsawakened.launcher",
   "build": {
     "frontendDist": "../src"
@@ -12,9 +12,9 @@
       {
         "title": "Legends Awakened",
         "width": 940,
-        "height": 640,
+        "height": 800,
         "minWidth": 940,
-        "minHeight": 640,
+        "minHeight": 800,
         "resizable": false,
         "maximizable": false,
         "decorations": false,
