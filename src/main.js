@@ -253,7 +253,9 @@ async function setupMatchWatch(){
   await EVT.listen('match-queued', ()=>{ if(awaiting) showProg('In matchmaking queue…', 55); });
   await EVT.listen('match-ready',  ()=>{ if(!awaiting) return; awaiting=false; showProg('Entering the arena…', 100);
     const w=getWin(); setTimeout(()=>{ if(w) w.close(); }, 700); });   // arena is up → step aside
-  await EVT.listen('match-timeout',()=>{ if(!awaiting) return; awaiting=false; resetPlay();
+  await EVT.listen('match-timeout',()=>{ if(!awaiting) return; awaiting=false;
+    const w=getWin(); if(w){ w.setAlwaysOnTop(false).catch(()=>{}); if(w.unmaximize) w.unmaximize().catch(()=>{}); }
+    resetPlay();
     toast('Match didn’t start — the game window is open; play from there.','err'); });
 }
 
@@ -279,6 +281,14 @@ async function play(){
       // instead of blindly closing. await_match is fire-and-forget (polls ~5 min, then times out).
       awaiting=true; showProg('Launching the game…', 14);
       invoke('await_match');
+      // Cover the in-game login/char-select with our queue overlay. The game spawns FOREGROUND so the
+      // DLL can dismiss the intro splash (needs focus) — wait a beat for that, then bring the launcher
+      // to the front + keep it on top so the user only sees our progress UI while the DLL drives the
+      // hidden login → char-select → play. match-ready then closes us → the arena is revealed.
+      const w=getWin();
+      if(w){ setTimeout(async()=>{ if(!awaiting) return;
+        try{ await w.setAlwaysOnTop(true); if(w.maximize) await w.maximize(); await w.setFocus(); }catch(_){}
+      }, 2000); }
     } else {
       toast('Launching…','ok');
       const w=getWin(); setTimeout(()=>{ if(w) w.close(); }, 900);
