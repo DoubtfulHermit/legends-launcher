@@ -114,26 +114,60 @@ fn write_prefs(s: &Settings) {
 // navigation — so the player lands in queue; 0 = leave the normal menus. The launcher's
 // "Skip menus → queue" toggle flips this just before each launch. No-op if the ini is absent.
 fn quickmatch_ini(dir: &Path) -> PathBuf { dir.join("BuildingBlocks").join("zz_quickmatch.ini") }
-fn write_quickmatch(dir: &Path, enabled: bool) {
-    let p = quickmatch_ini(dir);
-    let Ok(txt) = fs::read_to_string(&p) else { return; }; // DLL/ini not installed → nothing to toggle
-    let mut out = String::with_capacity(txt.len() + 16);
-    let mut done = false;
-    for line in txt.lines() {
-        if !done {
-            if let Some((k, _)) = line.split_once('=') {
-                if k.trim() == "enabled" {
-                    out.push_str(&format!("enabled = {}\n", if enabled { 1 } else { 0 }));
-                    done = true;
-                    continue;
-                }
+// Set flat key=value pairs in a section-less ini (zz_quickmatch.ini), line-preserving:
+// replace the first matching `key=…` (ignoring comments), else append.
+fn ini_set_flat(text: &str, kv: &[(&str, &str)]) -> String {
+    let mut lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    for (key, val) in kv {
+        let mut done = false;
+        for line in lines.iter_mut() {
+            let t = line.trim_start();
+            if t.starts_with('#') || t.starts_with(';') { continue; }
+            if let Some((k, _)) = t.split_once('=') {
+                if k.trim().eq_ignore_ascii_case(key) { *line = format!("{key} = {val}"); done = true; break; }
             }
         }
-        out.push_str(line);
-        out.push('\n');
+        if !done { lines.push(format!("{key} = {val}")); }
     }
-    if !done { out.push_str(&format!("enabled = {}\n", if enabled { 1 } else { 0 })); }
-    let _ = fs::write(&p, out);
+    let mut body = lines.join("\n"); body.push('\n'); body
+}
+
+// Configure BuildingBlocks/zz_quickmatch.ini for the seamless Play.
+//  - disabled  → enabled=0 (classic client, no drive).
+//  - skip + logged in → HANDS-OFF real-character flow: drive the engine's own login → Play-Online →
+//    char-select → select the custom → play, with ALL identity forcing OFF. The login loads the real
+//    character and the engine builds it; the DLL must NOT touch it (set_custom/set_nation/set_online
+//    were corrupting the login-loaded character). orchestrate=1 → hide menus + reveal at the arena.
+//  - skip, not logged in → inject path (default character).
+fn write_quickmatch(dir: &Path, enabled: bool, logged_in: bool) {
+    let p = quickmatch_ini(dir);
+    let Ok(txt) = fs::read_to_string(&p) else { return; }; // DLL/ini not installed → nothing to toggle
+    let kv: Vec<(&str, &str)> = if enabled && logged_in {
+        vec![
+            ("enabled", "1"),
+            ("local_login", "1"),
+            ("login_activate", "login screen"),
+            ("login_submit", "4 state button_login"),
+            ("login_seq", ""),
+            ("char_seq", "playonline,cscustom"),
+            ("queue_after_login", "1"),
+            ("set_nation", "0"), ("set_custom", ""), ("set_online", "0"), // NO forcing — let the engine build the real char
+            ("orchestrate", "1"),
+        ]
+    } else if enabled {
+        vec![("enabled", "1"), ("local_login", "0"), ("char_seq", ""),
+             ("set_nation", "0"), ("set_custom", ""), ("set_online", "0"), ("orchestrate", "1")]
+    } else {
+        vec![("enabled", "0")]
+    };
+    let _ = fs::write(&p, ini_set_flat(&txt, &kv));
+}
+
+// Write the seamless-login sidecar (username + single-use ticket) the DLL reads to drive the in-game
+// login (its WININET hook rewrites the check.jhtml POST to this account). Consumed + deleted by the DLL.
+fn write_game_creds(dir: &Path, username: &str, ticket: &str) {
+    if username.is_empty() || ticket.is_empty() { return; }
+    let _ = fs::write(quickmatch_creds(dir), format!("username={username}\nticket={ticket}\n"));
 }
 
 // Seamless-login creds for the game: a sidecar the DLL reads ONCE then deletes. Holds the
@@ -732,12 +766,15 @@ fn gamescope_available() -> bool {
 // `gamescope`/`gamescope_args` come from the launcher's Display toggle (Linux only).
 // Env vars (AVATAR_GAMESCOPE / AVATAR_GAMESCOPE_ARGS / AVATAR_VK_ICD) still override.
 #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
-fn spawn_game(dir: &Path, exe_path: &Path, gamescope: bool, gamescope_args: &str,
+fn spawn_game(dir: &Path, exe_path: &Path, skip_menu: bool, gamescope: bool, gamescope_args: &str,
               width: u32, height: u32, fullscreen: bool) -> Result<(), String> {
     use std::process::Command;
+    // The DLL's skip-menus drive is gated on the AVATAR_SKIP_MENUS env (so a leftover ini never hijacks
+    // a manually-launched classic client). The launcher sets it ONLY on the game it spawns for Play.
+    let skip_env = if skip_menu { "1" } else { "0" };
     #[cfg(target_os = "windows")]
     {
-        Command::new(exe_path).current_dir(dir).spawn()
+        Command::new(exe_path).current_dir(dir).env("AVATAR_SKIP_MENUS", skip_env).spawn()
             .map_err(|e| format!("launch {}: {e}", exe_path.display()))?;
     }
     #[cfg(not(target_os = "windows"))]
@@ -774,6 +811,7 @@ fn spawn_game(dir: &Path, exe_path: &Path, gamescope: bool, gamescope_args: &str
                 let mut cmd = Command::new("setsid");
                 cmd.arg("gamescope");
                 cmd.current_dir(dir);
+                cmd.env("AVATAR_SKIP_MENUS", skip_env);
                 if let Some(p) = &prefix { cmd.env("WINEPREFIX", p); }
                 if let Ok(icd) = std::env::var("AVATAR_VK_ICD") { cmd.env("VK_ICD_FILENAMES", icd); }
                 // Args from the toggle's field, then the env override, else AUTO:
@@ -809,6 +847,7 @@ fn spawn_game(dir: &Path, exe_path: &Path, gamescope: bool, gamescope_args: &str
 
         let mut cmd = Command::new("wine");
         cmd.arg(exe_path).current_dir(dir);
+        cmd.env("AVATAR_SKIP_MENUS", skip_env);
         if let Some(p) = prefix { cmd.env("WINEPREFIX", p); }
         cmd.spawn().map_err(|e|
             format!("launch via wine ({}): {e} — is wine installed?", exe_path.display()))?;
@@ -836,9 +875,13 @@ async fn play(settings: Settings, windowed: bool, username: Option<String>, tick
     // no ticket → the match uses the default character.
     let tk = if s.skip_menu { ticket.as_deref().unwrap_or("") } else { "" };
     write_arena(&dir, &s, Some(tk))?;      // set on skip+login, else clear (Some("")) so none lingers
-    write_quickmatch(&dir, s.skip_menu);   // Skip menus → straight into the arena queue
-    let _ = username;                      // the username is embedded in (and verified from) the ticket
-    clear_game_creds(&dir);                // legacy in-game-autologin creds path is retired
+    // Logged-in skip-menus → drive the engine's OWN login (hands-off) so the match loads + builds the
+    // REAL custom character. Needs the username (for the login POST) + a valid ticket (the password the
+    // WININET hook substitutes). Not logged in → inject path (default character).
+    let uname = username.as_deref().unwrap_or("").trim().to_string();
+    let logged_in = s.skip_menu && !uname.is_empty() && !tk.is_empty();
+    write_quickmatch(&dir, s.skip_menu, logged_in);
+    if logged_in { write_game_creds(&dir, &uname, tk); } else { clear_game_creds(&dir); }
     // Safety net: make sure the live textures match the toggle (normally a no-op —
     // set_textures already applied it when the toggle was flipped).
     apply_textures(&dir, s.hd_textures)?;
@@ -848,7 +891,7 @@ async fn play(settings: Settings, windowed: bool, username: Option<String>, tick
     // Config.ini (hardcoded 800x600 top-left), so only use it as a last-resort fallback.
     let windowed_exe = dir.join("AvatarMP_Windowed.exe");
     let target = if windowed_exe.is_file() { windowed_exe } else { dir.join("AvatarMP.exe") };
-    spawn_game(&dir, &target, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen)
+    spawn_game(&dir, &target, s.skip_menu, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen)
     }).await.map_err(|e| e.to_string())?
 }
 
