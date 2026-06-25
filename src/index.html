@@ -113,6 +113,11 @@
     <div class="field"><label>Room code <span style="color:var(--smoke);font-weight:700">&mdash; optional</span></label>
       <input id="stRoom" placeholder="leave blank for quick match"></div>
 
+    <div class="sec">Experimental</div>
+    <div class="row"><div class="rl"><b>Skip menus &rarr; arena <span class="xbadge">Experimental</span></b>
+      <small>On PLAY: signs you in and drops you straight into the arena as your character &mdash; no menus.</small></div>
+      <div class="tg" id="stSkip"></div></div>
+
     <div class="sec">Display</div>
     <div class="field"><label>Resolution</label>
       <select id="stRes"></select></div>
@@ -125,8 +130,6 @@
     <div class="field"><label>Server</label><input id="stServer" placeholder="gw.legends-awakened.com"></div>
 
     <div class="sec">Advanced</div>
-    <div class="row"><div class="rl"><b>Skip menus &rarr; queue</b><small>PLAY drops you straight into matchmaking</small></div>
-      <div class="tg" id="stSkip"></div></div>
     <div class="row" id="gsRow" hidden><div class="rl"><b>Gamescope</b><small>Wayland / hybrid-GPU wrapper (Linux)</small></div>
       <div class="tg" id="stGs"></div></div>
     <input id="stGsArgs" class="gsargs" hidden placeholder="-W 1920 -H 1080  (hybrid GPU? --prefer-vk-device 1002:1638)">

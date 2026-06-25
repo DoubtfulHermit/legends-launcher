@@ -12,7 +12,7 @@ const FALLBACK = {
     resolutions:[[1024,768],[1280,960],[1440,1080],[1600,1200],[1920,1440]],
     hd_available:true, gamescope_available:false,
     settings:{ host:'', room:'', queue:4, fullscreen:true, width:1440, height:1080,
-               hd_textures:false, gamescope:false, gamescope_args:'', skip_menu:true } },
+               hd_textures:false, gamescope:false, gamescope_args:'', skip_menu:false } },
   status: { reachable:true, gateway:true, database:true, game_server:true, players:27 },
   gw_login: { ok:true, screen_name:null }, gw_ticket: { ok:false },
   check_updates: { ok:true }, sync: { ok:true, updated:[], failed:[] },
@@ -33,7 +33,7 @@ const SAVE_DEFAULTS = { element:'fire', session:null,
   board:{ mode:'overall', nation:'fire' },
   settings:{
     queue:4, room:'', server:DEFAULT_SERVER, res:'1440x1080',
-    hd:false, fullscreen:true, skip_menu:true, gamescope:false, gamescope_args:'' } };
+    hd:false, fullscreen:true, skip_menu:false, gamescope:false, gamescope_args:'' } };
 function loadSave(){
   try{ const j = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}');
     return { ...SAVE_DEFAULTS, ...j,
@@ -240,25 +240,50 @@ function gather(){
            gamescope:!!st.gamescope, gamescope_args:(st.gamescope_args||'').trim(),
            skip_menu:!!st.skip_menu };
 }
+// PLAY morphs into a status pill (#prog) — reused for the experimental Skip-menus orchestration.
+function showProg(text, pct){ $('play').style.display='none'; $('prog').style.display='block';
+  $('progText').textContent=text; $('progFill').style.width=(pct||0)+'%'; $('progPct').textContent = pct!=null?pct+'%':''; }
+function resetPlay(){ $('prog').style.display='none'; $('play').style.display='flex'; $('play').disabled=false; setPlayLabel('PLAY'); }
+
+// Experimental "Skip menus → arena": the quickmatch DLL drives login + queue hands-off and writes
+// signal files; the backend `await_match` forwards them as events. Wire the events once.
+let awaiting=false;
+async function setupMatchWatch(){
+  const EVT=TAURI.event; if(!EVT || !EVT.listen) return;
+  await EVT.listen('match-queued', ()=>{ if(awaiting) showProg('In matchmaking queue…', 55); });
+  await EVT.listen('match-ready',  ()=>{ if(!awaiting) return; awaiting=false; showProg('Entering the arena…', 100);
+    const w=getWin(); setTimeout(()=>{ if(w) w.close(); }, 700); });   // arena is up → step aside
+  await EVT.listen('match-timeout',()=>{ if(!awaiting) return; awaiting=false; resetPlay();
+    toast('Match didn’t start — the game window is open; play from there.','err'); });
+}
+
 async function play(){
   if(!found){ return locate(); }   // PLAY doubles as "locate game" when not found
   const settings=gather();
-  // Seamless identity: mint a one-time ticket from the signed-in session so the game
-  // loads the real character. Password is memory-only; on a resumed session without it,
-  // fall back to the default character.
+  // Seamless identity: mint a one-time ticket from the signed-in session so the game loads the
+  // REAL character. Password is memory-only; a resumed session without it falls back to default.
   let username=null, ticket=null;
   if(settings.skip_menu && SAVE.session && sessionPass){
     try{ const r=await invoke('gw_ticket',{ host:settings.host, username:SAVE.session.name, password:sessionPass });
       if(r && r.ok && r.ticket){ username=SAVE.session.name; ticket=r.ticket; }
-      else toast('Could not get a login ticket — using default character.','err');
+      else toast('Could not get a login ticket — using the default character.','err');
     }catch(e){ toast('Ticket error: '+e,'err'); }
   }
-  const btn=$('play'); btn.disabled=true; setPlayLabel('LAUNCHING…');
+  // Hands-off orchestration only runs when Skip-menus is on AND we have a login ticket.
+  const seamless = settings.skip_menu && !!ticket;
+  $('play').disabled=true; setPlayLabel('LAUNCHING…');
   try{
     await invoke('play',{ settings, windowed:!settings.fullscreen, username, ticket });
-    toast('Entering the arena…','ok');
-    const w=getWin(); setTimeout(()=>{ if(w) w.close(); }, 900);
-  }catch(e){ toast(String(e),'err'); btn.disabled=false; setPlayLabel('PLAY'); }
+    if(seamless){
+      // Keep the launcher as a queue overlay and follow the DLL signals (queued → ready)
+      // instead of blindly closing. await_match is fire-and-forget (polls ~5 min, then times out).
+      awaiting=true; showProg('Launching the game…', 14);
+      invoke('await_match');
+    } else {
+      toast('Launching…','ok');
+      const w=getWin(); setTimeout(()=>{ if(w) w.close(); }, 900);
+    }
+  }catch(e){ toast(String(e),'err'); resetPlay(); }
 }
 async function locate(){
   try{ const p=await invoke('locate'); if(p) await refresh(); else toast('That folder has no Config.ini.','err'); }
@@ -418,5 +443,6 @@ renderBoard();
 if(SAVE.session){ showChip(SAVE.session.name); loginEl.classList.add('hide'); }
 else { showChip(null); setTimeout(()=>$('liUser').focus(), 60); }
 startParticles();
+setupMatchWatch();   // listen for the experimental hands-off match signals
 refresh().then(()=>{ pollStatus(); checkForUpdates(false); loadBoard(); });
 setInterval(pollStatus, 12000);

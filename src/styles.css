@@ -230,6 +230,9 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
 .drawer .x:hover{color:var(--bone);background:rgba(255,255,255,.06)}
 .drawer .sec{font-size:10px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:var(--smoke);
   margin:20px 0 12px;padding-bottom:7px;border-bottom:1px solid var(--bd)}
+.xbadge{display:inline-block;margin-left:7px;padding:1px 6px;border-radius:6px;font-size:8.5px;font-weight:800;
+  letter-spacing:.08em;text-transform:uppercase;color:#ffd9a8;background:rgba(var(--ember-rgb),.18);
+  border:1px solid rgba(var(--ember-rgb),.42);vertical-align:middle}
 
 /* ── account dropdown ── */
 .acct-menu{position:absolute;top:50px;right:24px;z-index:35;width:206px;border-radius:12px;background:#15101c;
