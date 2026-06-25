@@ -724,19 +724,9 @@ async fn check_updates(host: String) -> UpdateCheck {
     let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(15)).build();
     let mut out = UpdateCheck { ok: true, ..Default::default() };
     let mut reached = false;
-    // launcher binary: newer version published? (prompts a manual DOWNLOAD, not a swap)
-    for scheme in ["https", "http"] {
-        let url = format!("{scheme}://{host}/launcher/release.json");
-        if let Ok(resp) = agent.get(&url).call() {
-            if let Ok(r) = resp.into_json::<Release>() {
-                reached = true;
-                if version_gt(&r.version, env!("CARGO_PKG_VERSION")) { out.launcher_version = Some(r.version); }
-                break;
-            }
-        }
-    }
-    // game content (DLLs/textures): how many files differ from the manifest? The launcher
-    // CAN safely patch these (unlike its own running exe) — but only with the user's OK.
+    // Launcher self-update is handled by the updater plugin (GitHub Releases); check_updates
+    // now only covers game CONTENT (DLLs/textures) that differ from the gateway manifest —
+    // which the launcher CAN safely patch into the user-writable clone, with the user's OK.
     if let Some(dir) = resolve_game_dir() {
         if let Some((manifest, _)) = fetch_manifest(&agent, host) {
             reached = true;
@@ -753,106 +743,47 @@ async fn check_updates(host: String) -> UpdateCheck {
     }).await.unwrap_or_default()
 }
 
-// ---- launcher self-update ---------------------------------------------------
-// The launcher updates ITSELF (not just game files): it reads /launcher/release.json
-// (the published launcher version + a per-OS binary sha256), and if that's newer than
-// the running version, downloads this platform's binary, verifies the hash, and swaps
-// it onto disk (applies next restart). Best-effort — any failure leaves the running
-// launcher untouched, so a bad update can never brick it.
-#[derive(Deserialize)]
-struct ReleasePlatform { file: String, sha256: String }
-#[derive(Deserialize)]
-struct Release { version: String, #[serde(default)] platforms: std::collections::HashMap<String, ReleasePlatform> }
-
+// ---- launcher self-update (tauri-plugin-updater, from GitHub Releases) -------
+// The launcher is a bundled, installed app (NSIS on Windows, AppImage on Linux), so the
+// OFFICIAL updater plugin does the download + minisign signature verification + install +
+// restart — correctly per-OS, instead of a hand-rolled exe swap. The update endpoint and
+// the public key live in tauri.conf.json (plugins.updater). See docs/handoff_release_signing.md.
 #[derive(Serialize, Default)]
 struct SelfUpdateOut { updated: bool, version: Option<String>, error: Option<String> }
 
-fn platform_key() -> &'static str {
-    #[cfg(target_os = "windows")] { "windows" }
-    #[cfg(target_os = "macos")] { "macos" }
-    #[cfg(all(unix, not(target_os = "macos")))] { "linux" }
-}
-
-// "1.2.3" > "1.2.0"? Missing/garbage parts read as 0.
-fn version_gt(remote: &str, local: &str) -> bool {
-    let parse = |s: &str| -> Vec<u64> { s.split('.').map(|p| p.trim().parse().unwrap_or(0)).collect() };
-    let (r, l) = (parse(remote), parse(local));
-    for i in 0..r.len().max(l.len()) {
-        let (rv, lv) = (*r.get(i).unwrap_or(&0), *l.get(i).unwrap_or(&0));
-        if rv != lv { return rv > lv; }
-    }
-    false
-}
-
-// Replace the running executable's file with `bytes`. On Unix, renaming over the
-// running binary is safe (the process keeps the old inode; the next launch is new).
-// On Windows the running .exe can't be overwritten, but it CAN be renamed aside first.
-fn swap_self(exe: &Path, bytes: &[u8]) -> Result<(), String> {
-    let dir = exe.parent().ok_or("no exe dir")?;
-    let newp = dir.join(".launcher-update.new");
-    fs::write(&newp, bytes).map_err(|e| format!("write update: {e}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&newp, fs::Permissions::from_mode(0o755));
-        fs::rename(&newp, exe).map_err(|e| { let _ = fs::remove_file(&newp); format!("swap: {e}") })?;
-    }
-    #[cfg(windows)]
-    {
-        let oldp = dir.join(".launcher-update.old");
-        let _ = fs::remove_file(&oldp);
-        fs::rename(exe, &oldp).map_err(|e| { let _ = fs::remove_file(&newp); format!("rename current: {e}") })?;
-        if let Err(e) = fs::rename(&newp, exe) {
-            let _ = fs::rename(&oldp, exe); // roll back
-            let _ = fs::remove_file(&newp);
-            return Err(format!("install update: {e}"));
-        }
-    }
-    Ok(())
-}
-
-// Sync worker: both the async `self_update` command (off the UI thread) and the
-// CLI `--self-update` path call this. Kept non-async so the CLI path needs no runtime.
-fn self_update_blocking(host: String) -> SelfUpdateOut {
-    use std::io::Read;
-    let host = host.trim().trim_end_matches('/');
-    if host.is_empty() { return SelfUpdateOut::default(); }
-    let local = env!("CARGO_PKG_VERSION");
-    let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(20)).build();
-    let (rel, scheme) = {
-        let mut found = None;
-        for scheme in ["https", "http"] {
-            let url = format!("{scheme}://{host}/launcher/release.json");
-            if let Ok(resp) = agent.get(&url).call() {
-                if let Ok(r) = resp.into_json::<Release>() { found = Some((r, scheme)); break; }
-            }
-        }
-        match found { Some(x) => x, None => return SelfUpdateOut::default() } // unreachable server = no-op
-    };
-    if !version_gt(&rel.version, local) { return SelfUpdateOut::default(); }
-    let plat = match rel.platforms.get(platform_key()) {
-        Some(p) => p, None => return SelfUpdateOut { error: Some("no build for this OS".into()), ..Default::default() },
-    };
-    if !safe_rel(&plat.file) { return SelfUpdateOut { error: Some("bad file path".into()), ..Default::default() }; }
-    let exe = match std::env::current_exe() {
-        Ok(e) => e, Err(e) => return SelfUpdateOut { error: Some(format!("exe path: {e}")), ..Default::default() },
-    };
-    let url = format!("{scheme}://{host}/download/{}", plat.file);
-    let mut buf = Vec::new();
-    match agent.get(&url).call() {
-        Ok(resp) => { if resp.into_reader().read_to_end(&mut buf).is_err() { return SelfUpdateOut { error: Some("download failed".into()), ..Default::default() }; } }
-        Err(_) => return SelfUpdateOut { error: Some("download failed".into()), ..Default::default() },
-    }
-    if sha256_hex(&buf) != plat.sha256 { return SelfUpdateOut { error: Some("hash mismatch".into()), ..Default::default() }; }
-    match swap_self(&exe, &buf) {
-        Ok(()) => SelfUpdateOut { updated: true, version: Some(rel.version), error: None },
-        Err(e) => SelfUpdateOut { error: Some(e), ..Default::default() },
-    }
-}
-
 #[tauri::command]
-async fn self_update(host: String) -> SelfUpdateOut {
-    tauri::async_runtime::spawn_blocking(move || self_update_blocking(host)).await.unwrap_or_default()
+async fn self_update(app: tauri::AppHandle) -> SelfUpdateOut {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(e) => return SelfUpdateOut { error: Some(e.to_string()), ..Default::default() },
+    };
+    let update = match updater.check().await {
+        Ok(Some(u)) => u,
+        Ok(None) => return SelfUpdateOut::default(),          // already current
+        Err(e) => return SelfUpdateOut { error: Some(e.to_string()), ..Default::default() },
+    };
+    let version = update.version.clone();
+    match update.download_and_install(|_chunk, _total| {}, || {}).await {
+        Ok(()) => SelfUpdateOut { updated: true, version: Some(version), error: None },
+        Err(e) => SelfUpdateOut { error: Some(e.to_string()), ..Default::default() },
+    }
+}
+
+#[derive(Serialize, Default)]
+struct SelfUpdateCheck { available: bool, version: Option<String> }
+
+// Is a newer signed launcher available? (checks the updater endpoint, installs nothing —
+// the UI prompts, then calls self_update.) Silent no-op if the endpoint is unreachable.
+#[tauri::command]
+async fn check_self_update(app: tauri::AppHandle) -> SelfUpdateCheck {
+    use tauri_plugin_updater::UpdaterExt;
+    if let Ok(updater) = app.updater() {
+        if let Ok(Some(u)) = updater.check().await {
+            return SelfUpdateCheck { available: true, version: Some(u.version) };
+        }
+    }
+    SelfUpdateCheck::default()
 }
 
 // On a path like `…/<prefix>/drive_c/…`, return `<prefix>` so we can set WINEPREFIX
@@ -1173,20 +1104,10 @@ pub fn run() {
         println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
         std::process::exit(if out.ok { 0 } else { 1 });
     }
-    if let Some(pos) = args.iter().position(|a| a == "--self-update") {
-        let host = args.get(pos + 1).filter(|h| !h.starts_with('-')).cloned()
-            .filter(|h| !h.is_empty())
-            .or_else(|| resolve_game_dir().map(|d| read_settings(&d).host).filter(|h| !h.is_empty()))
-            .unwrap_or_else(|| "gw.legends-awakened.com".to_string());
-        eprintln!("checking launcher update against {host} (running {}) …", env!("CARGO_PKG_VERSION"));
-        let out = self_update_blocking(host);
-        println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
-        std::process::exit(if out.error.is_none() { 0 } else { 1 });
-    }
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // The remade menus load the game's real textures straight from the install
         // (game/Textures), so the webview can `convertFileSrc()` them. The install dir
         // is only known at runtime, so allow it here rather than via a static config glob.
@@ -1197,7 +1118,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

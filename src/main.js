@@ -289,13 +289,8 @@ async function checkForUpdates(manual){
   if(manual) setUpdateBtn('Checking…',true);
   let r; try{ r=await invoke('check_updates',{ host }); }
   catch(e){ if(manual){ toast('Update check failed.','err'); setUpdateBtn('Check for updates',false); } return; }
-  const files=(r && r.content_files)||0;
-  if(r && r.launcher_version){
-    updateMode='launcher'; const have=appVersion?` (you have v${appVersion})`:'';
-    $('updateBody').innerHTML=`A newer launcher is available — <b>v${r.launcher_version}</b>${have}. Click Download to get it, then replace your current launcher.`;
-    resetModal(); $('updateNow').textContent='Download'; $('updateModal').setAttribute('aria-hidden','false');
-    if(manual) setUpdateBtn('Check for updates',false);
-  } else if(files>0){
+  const files=(r && r.content_files)||0;   // check_updates is content-only now; launcher → plugin
+  if(files>0){
     updateMode='content';
     $('updateBody').innerHTML=`<b>${files}</b> game file${files>1?'s':''}${r.content_bytes?` (${fmtBytes(r.content_bytes)})`:''} can be updated (textures / plugins). Download them now?`;
     resetModal(); $('updateNow').textContent='Update'; $('updateModal').setAttribute('aria-hidden','false');
@@ -306,7 +301,27 @@ async function checkForUpdates(manual){
     setTimeout(()=>setUpdateBtn('Check for updates',false), 5000);
   }
 }
-async function downloadUpdate(){ try{ await invoke('open_url',{ url:DOWNLOAD_URL }); }catch{ toast('Could not open the download page.','err'); } closeUpdateModal(); }
+// Launcher self-update via the updater plugin (signed installer from GitHub Releases).
+async function checkLauncherUpdate(){
+  let r; try{ r=await invoke('check_self_update'); }catch{ return; }
+  if(r && r.available){
+    updateMode='launcher';
+    $('updateBody').innerHTML=`A newer launcher is available — <b>v${r.version}</b>${appVersion?` (you have v${appVersion})`:''}. Install it now? The launcher will restart.`;
+    resetModal(); $('updateNow').textContent='Update'; $('updateModal').setAttribute('aria-hidden','false');
+  }
+}
+async function installLauncherUpdate(){
+  $('updateNow').disabled=true; $('updateLater').disabled=true; $('updateProgress').hidden=false;
+  $('updateBarFill').style.width='40%'; $('updateBarLabel').textContent='Downloading & installing…';
+  try{
+    const r=await invoke('self_update');
+    if(r && r.updated){ $('updateBarFill').style.width='100%'; $('updateBarLabel').textContent='Installed — restarting…';
+      toast('Updated to v'+(r.version||'')+' — restarting…','ok'); setTimeout(()=>invoke('restart'), 900); }
+    else { const msg=(r && r.error)||'Update failed.'; $('updateBarLabel').textContent=msg; toast(msg,'err');
+      $('updateLater').textContent='Close'; $('updateLater').disabled=false; $('updateNow').disabled=false; }
+  }catch(e){ $('updateBarLabel').textContent=String(e); toast('Update failed.','err');
+    $('updateLater').textContent='Close'; $('updateLater').disabled=false; $('updateNow').disabled=false; }
+}
 async function applyContent(){
   const host=(SAVE.settings.server||'').trim();
   $('updateNow').disabled=true; $('updateLater').disabled=true; $('updateProgress').hidden=false; $('updateBarLabel').textContent='Starting…';
@@ -328,7 +343,7 @@ async function applyContent(){
   finally{ if(typeof unlisten==='function') unlisten(); }
 }
 $('checkUpdates').addEventListener('click', ()=>checkForUpdates(true));
-$('updateNow').addEventListener('click', ()=>{ if(updateMode==='launcher') downloadUpdate(); else if(updateMode==='content') applyContent(); });
+$('updateNow').addEventListener('click', ()=>{ if(updateMode==='launcher') installLauncherUpdate(); else if(updateMode==='content') applyContent(); });
 $('updateLater').addEventListener('click', closeUpdateModal);
 
 // ── boot: load backend state, reconcile settings, then gate or resume ────────
@@ -456,5 +471,5 @@ renderBoard();
 if(SAVE.session){ showChip(SAVE.session.name); loginEl.classList.add('hide'); }
 else { showChip(null); setTimeout(()=>$('liUser').focus(), 60); }
 startParticles();
-refresh().then(()=>{ pollStatus(); checkForUpdates(false); loadBoard(); });
+refresh().then(()=>{ pollStatus(); checkForUpdates(false); checkLauncherUpdate(); loadBoard(); });
 setInterval(pollStatus, 12000);
