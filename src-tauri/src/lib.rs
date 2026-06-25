@@ -891,8 +891,33 @@ async fn play(settings: Settings, windowed: bool, username: Option<String>, tick
     // Config.ini (hardcoded 800x600 top-left), so only use it as a last-resort fallback.
     let windowed_exe = dir.join("AvatarMP_Windowed.exe");
     let target = if windowed_exe.is_file() { windowed_exe } else { dir.join("AvatarMP.exe") };
+    // Clear stale orchestration signals so await_match() sees only THIS launch's queue/reveal.
+    let _ = fs::remove_file(dir.join("zz_in_queue"));
+    let _ = fs::remove_file(dir.join("zz_match_ready"));
     spawn_game(&dir, &target, s.skip_menu, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen)
     }).await.map_err(|e| e.to_string())?
+}
+
+// Watch the DLL's orchestration signal files (written in the game dir) and forward them to the
+// frontend so it can show the queue overlay then reveal the game:
+//   zz_in_queue   -> emit "match-queued"  (the engine is in the matchmaking queue; show queue UI)
+//   zz_match_ready-> emit "match-ready"   (the arena scene began; reveal the game window)
+// The frontend calls this once right after play(). Fire-and-forget poll (100ms, ~5min cap).
+#[tauri::command]
+fn await_match(app: tauri::AppHandle) {
+    use tauri::Emitter;
+    std::thread::spawn(move || {
+        let Some(dir) = resolve_game_dir() else { return; };
+        let in_queue = dir.join("zz_in_queue");
+        let ready = dir.join("zz_match_ready");
+        let mut queued = false;
+        for _ in 0..3000 {
+            if !queued && in_queue.exists() { queued = true; let _ = app.emit("match-queued", ()); }
+            if ready.exists() { let _ = app.emit("match-ready", ()); return; }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let _ = app.emit("match-timeout", ());
+    });
 }
 
 // ---- remade menus (Tauri) ---------------------------------------------------
@@ -1063,7 +1088,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, check_updates, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, await_match, status, sync, check_updates, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
