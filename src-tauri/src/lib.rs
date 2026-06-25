@@ -1090,13 +1090,19 @@ async fn gw_ticket(host: String, username: String, password: String) -> TicketOu
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // WebKitGTK renders a blank/grey window on some Linux + Wayland + GPU combos unless
-    // DMABUF rendering is disabled. Set it before the WebView initialises so the AppImage
-    // works out of the box. Harmless elsewhere (only WebKitGTK reads it); respects an
-    // explicit override if the user already set it.
+    // WebKitGTK on Linux/Wayland renders a grey/blank window — or fails EGL init outright
+    // (`Could not create default EGL display: EGL_BAD_PARAMETER`) — because the AppImage's
+    // bundled, older GL/EGL/WebKit libs can't talk to a fresh (rolling-release) system GPU
+    // stack. Force a compatible path before the WebView starts: XWayland + no GPU
+    // compositing/DMABUF. No-op on X11; harmless on Windows/macOS. Each respects an
+    // explicit user override.
     #[cfg(target_os = "linux")]
-    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    for (k, v) in [
+        ("GDK_BACKEND", "x11"),                       // route through XWayland (compatible EGL)
+        ("WEBKIT_DISABLE_COMPOSITING_MODE", "1"),     // works on the bundled older WebKit
+        ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),      // works on newer WebKit
+    ] {
+        if std::env::var_os(k).is_none() { std::env::set_var(k, v); }
     }
     // Headless patcher: `launcher --sync [host]` runs the content sync and exits
     // (no window). Host defaults to the saved arena_link.ini host, then the official
