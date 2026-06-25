@@ -245,19 +245,6 @@ function showProg(text, pct){ $('play').style.display='none'; $('prog').style.di
   $('progText').textContent=text; $('progFill').style.width=(pct||0)+'%'; $('progPct').textContent = pct!=null?pct+'%':''; }
 function resetPlay(){ $('prog').style.display='none'; $('play').style.display='flex'; $('play').disabled=false; setPlayLabel('PLAY'); }
 
-// Experimental "Skip menus → arena": the quickmatch DLL drives login + queue hands-off and writes
-// signal files; the backend `await_match` forwards them as events. Wire the events once.
-let awaiting=false;
-async function setupMatchWatch(){
-  const EVT=TAURI.event; if(!EVT || !EVT.listen) return;
-  await EVT.listen('match-queued', ()=>{ if(awaiting) showProg('In matchmaking queue…', 55); });
-  await EVT.listen('match-ready',  ()=>{ if(!awaiting) return; awaiting=false; showProg('Entering the arena…', 100);
-    const w=getWin(); setTimeout(()=>{ if(w) w.close(); }, 700); });   // arena is up → step aside
-  await EVT.listen('match-timeout',()=>{ if(!awaiting) return; awaiting=false;
-    const w=getWin(); if(w){ w.setAlwaysOnTop(false).catch(()=>{}); if(w.unmaximize) w.unmaximize().catch(()=>{}); }
-    resetPlay();
-    toast('Match didn’t start — the game window is open; play from there.','err'); });
-}
 
 async function play(){
   if(!found){ return locate(); }   // PLAY doubles as "locate game" when not found
@@ -271,28 +258,14 @@ async function play(){
       else toast('Could not get a login ticket — using the default character.','err');
     }catch(e){ toast('Ticket error: '+e,'err'); }
   }
-  // Hands-off orchestration only runs when Skip-menus is on AND we have a login ticket.
-  const seamless = settings.skip_menu && !!ticket;
-  $('play').disabled=true; setPlayLabel('LAUNCHING…');
+  // AUTO-LOGIN: with Skip-menus on + a ticket, the DLL submits this account's login in-game (fast)
+  // and hands the menu to the player — so you never type the in-game login again. The launcher's job
+  // ends at launch; it steps aside (no cover/queue orchestration — the game runs normally).
+  $('play').disabled=true; setPlayLabel(ticket ? 'LOGGING IN…' : 'LAUNCHING…');
   try{
     await invoke('play',{ settings, windowed:!settings.fullscreen, username, ticket });
-    if(seamless){
-      // Keep the launcher as a queue overlay and follow the DLL signals (queued → ready)
-      // instead of blindly closing. await_match is fire-and-forget (polls ~5 min, then times out).
-      awaiting=true; showProg('Launching the game…', 14);
-      invoke('await_match');
-      // Cover the in-game login/char-select with our queue overlay. The game spawns FOREGROUND so the
-      // DLL can dismiss the intro splash (needs focus) — wait a beat for that, then bring the launcher
-      // to the front + keep it on top so the user only sees our progress UI while the DLL drives the
-      // hidden login → char-select → play. match-ready then closes us → the arena is revealed.
-      const w=getWin();
-      if(w){ setTimeout(async()=>{ if(!awaiting) return;
-        try{ await w.setAlwaysOnTop(true); if(w.maximize) await w.maximize(); await w.setFocus(); }catch(_){}
-      }, 2000); }
-    } else {
-      toast('Launching…','ok');
-      const w=getWin(); setTimeout(()=>{ if(w) w.close(); }, 900);
-    }
+    toast(ticket ? 'Logging you in…' : 'Launching…','ok');
+    const w=getWin(); setTimeout(()=>{ if(w) w.close(); }, 900);
   }catch(e){ toast(String(e),'err'); resetPlay(); }
 }
 async function locate(){
@@ -453,6 +426,5 @@ renderBoard();
 if(SAVE.session){ showChip(SAVE.session.name); loginEl.classList.add('hide'); }
 else { showChip(null); setTimeout(()=>$('liUser').focus(), 60); }
 startParticles();
-setupMatchWatch();   // listen for the experimental hands-off match signals
 refresh().then(()=>{ pollStatus(); checkForUpdates(false); loadBoard(); });
 setInterval(pollStatus, 12000);

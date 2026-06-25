@@ -133,12 +133,12 @@ fn ini_set_flat(text: &str, kv: &[(&str, &str)]) -> String {
 }
 
 // Configure BuildingBlocks/zz_quickmatch.ini for the seamless Play.
-//  - disabled  → enabled=0 (classic client, no drive).
-//  - skip + logged in → HANDS-OFF real-character flow: drive the engine's own login → Play-Online →
-//    char-select → select the custom → play, with ALL identity forcing OFF. The login loads the real
-//    character and the engine builds it; the DLL must NOT touch it (set_custom/set_nation/set_online
-//    were corrupting the login-loaded character). orchestrate=1 → hide menus + reveal at the arena.
-//  - skip, not logged in → inject path (default character).
+//  - disabled / not logged in → enabled=0: classic client, the player logs in by hand.
+//  - skip + logged in → AUTO-LOGIN ONLY: the DLL auto-submits the launcher's authenticated login
+//    (username + ticket, no password) FAST, then STOPS at the post-login menu and hands control to the
+//    player. No char-select/queue driving, NO identity forcing, NO cover/reveal — the game shows
+//    normally; it just lands logged in. (login_gap_ms small = a flash.) The launcher having already
+//    authenticated the user is the whole point: you never type the in-game login again.
 fn write_quickmatch(dir: &Path, enabled: bool, logged_in: bool) {
     let p = quickmatch_ini(dir);
     let Ok(txt) = fs::read_to_string(&p) else { return; }; // DLL/ini not installed → nothing to toggle
@@ -149,16 +149,14 @@ fn write_quickmatch(dir: &Path, enabled: bool, logged_in: bool) {
             ("login_activate", "login screen"),
             ("login_submit", "4 state button_login"),
             ("login_seq", ""),
-            ("char_seq", "playonline,cscustom"),
-            ("queue_after_login", "1"),
-            ("set_nation", "0"), ("set_custom", ""), ("set_online", "0"), // NO forcing — let the engine build the real char
-            ("orchestrate", "1"),
+            ("char_seq", ""),            // STOP after login — hand the menu to the player
+            ("queue_after_login", "0"),  // don't drive char-select / queue
+            ("set_nation", "0"), ("set_custom", ""), ("set_online", "0"), // NO forcing
+            ("orchestrate", "0"),        // game shown normally (no cover/reveal hackery)
+            ("login_gap_ms", "500"),     // fast: minimal pause between the login steps
         ]
-    } else if enabled {
-        vec![("enabled", "1"), ("local_login", "0"), ("char_seq", ""),
-             ("set_nation", "0"), ("set_custom", ""), ("set_online", "0"), ("orchestrate", "1")]
     } else {
-        vec![("enabled", "0")]
+        vec![("enabled", "0")]   // not logged in → classic client (manual login)
     };
     let _ = fs::write(&p, ini_set_flat(&txt, &kv));
 }
@@ -891,33 +889,8 @@ async fn play(settings: Settings, windowed: bool, username: Option<String>, tick
     // Config.ini (hardcoded 800x600 top-left), so only use it as a last-resort fallback.
     let windowed_exe = dir.join("AvatarMP_Windowed.exe");
     let target = if windowed_exe.is_file() { windowed_exe } else { dir.join("AvatarMP.exe") };
-    // Clear stale orchestration signals so await_match() sees only THIS launch's queue/reveal.
-    let _ = fs::remove_file(dir.join("zz_in_queue"));
-    let _ = fs::remove_file(dir.join("zz_match_ready"));
     spawn_game(&dir, &target, s.skip_menu, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen)
     }).await.map_err(|e| e.to_string())?
-}
-
-// Watch the DLL's orchestration signal files (written in the game dir) and forward them to the
-// frontend so it can show the queue overlay then reveal the game:
-//   zz_in_queue   -> emit "match-queued"  (the engine is in the matchmaking queue; show queue UI)
-//   zz_match_ready-> emit "match-ready"   (the arena scene began; reveal the game window)
-// The frontend calls this once right after play(). Fire-and-forget poll (100ms, ~5min cap).
-#[tauri::command]
-fn await_match(app: tauri::AppHandle) {
-    use tauri::Emitter;
-    std::thread::spawn(move || {
-        let Some(dir) = resolve_game_dir() else { return; };
-        let in_queue = dir.join("zz_in_queue");
-        let ready = dir.join("zz_match_ready");
-        let mut queued = false;
-        for _ in 0..3000 {
-            if !queued && in_queue.exists() { queued = true; let _ = app.emit("match-queued", ()); }
-            if ready.exists() { let _ = app.emit("match-ready", ()); return; }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        let _ = app.emit("match-timeout", ());
-    });
 }
 
 // ---- remade menus (Tauri) ---------------------------------------------------
@@ -1088,7 +1061,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, await_match, status, sync, check_updates, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, check_updates, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
