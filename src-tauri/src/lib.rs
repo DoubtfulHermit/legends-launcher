@@ -1090,6 +1090,14 @@ async fn gw_ticket(host: String, username: String, password: String) -> TicketOu
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // WebKitGTK renders a blank/grey window on some Linux + Wayland + GPU combos unless
+    // DMABUF rendering is disabled. Set it before the WebView initialises so the AppImage
+    // works out of the box. Harmless elsewhere (only WebKitGTK reads it); respects an
+    // explicit override if the user already set it.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
     // Headless patcher: `launcher --sync [host]` runs the content sync and exits
     // (no window). Host defaults to the saved arena_link.ini host, then the official
     // gateway. Lets you patch from a script/cron and makes the patcher testable.
