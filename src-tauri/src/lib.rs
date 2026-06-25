@@ -73,6 +73,7 @@ fn app_home() -> Option<PathBuf> {
 }
 fn clone_dir() -> Option<PathBuf> { app_home().map(|d| d.join("game")) }
 fn clone_meta_path() -> Option<PathBuf> { app_home().map(|d| d.join("clone.state")) }
+fn clone_prefix_path() -> Option<PathBuf> { app_home().map(|d| d.join("wineprefix.path")) }
 
 // The dir the launcher PATCHES and RUNS from: the clone if it's a valid game dir,
 // otherwise the located original (pre-clone behaviour). Once cloned, every caller
@@ -169,6 +170,11 @@ fn ensure_clone(on: &dyn Fn(u32, u32, &str)) -> Result<PathBuf, String> {
     on(0, total, "");
     copy_tree(&src, &dst, total, &mut done, on).map_err(|e| format!("clone copy: {e}"))?;
     let _ = fs::write(&meta, &fp);
+    // Linux: record which wine prefix the ORIGINAL lived in, so we run the clone there
+    // (that prefix already has the game's deps). Harmless on Windows (no drive_c → None).
+    if let (Some(pp), Some(wp)) = (clone_prefix_path(), wine_prefix_of(&src)) {
+        let _ = fs::write(&pp, wp.to_string_lossy().as_bytes());
+    }
     Ok(dst)
 }
 
@@ -862,6 +868,21 @@ fn wine_prefix_of(dir: &Path) -> Option<PathBuf> {
     None
 }
 
+// The WINEPREFIX to run `dir` under: the prefix it sits inside (original installed in a
+// prefix), else the prefix recorded at clone time (the clone lives outside any drive_c
+// but should run in the original's working prefix, which has the game's deps), else
+// the default (~/.wine). See docs/handoff_patching.md.
+fn effective_wine_prefix(dir: &Path) -> Option<PathBuf> {
+    if let Some(p) = wine_prefix_of(dir) { return Some(p); }
+    if let Some(pp) = clone_prefix_path() {
+        if let Ok(s) = fs::read_to_string(&pp) {
+            let p = PathBuf::from(s.trim());
+            if p.is_dir() { return Some(p); }
+        }
+    }
+    None
+}
+
 // Is `bin` runnable from PATH? (used to decide whether gamescope is available)
 #[cfg(target_os = "linux")]
 fn on_path(bin: &str) -> bool {
@@ -893,8 +914,8 @@ fn spawn_game(dir: &Path, exe_path: &Path, skip_menu: bool, gamescope: bool, gam
     #[cfg(not(target_os = "windows"))]
     {
         // AvatarMP.exe is a Windows binary — on Linux/macOS run it through wine,
-        // pointing WINEPREFIX at the prefix the game folder lives inside.
-        let prefix = wine_prefix_of(dir);
+        // pointing WINEPREFIX at the clone's recorded prefix (or the one it sits inside).
+        let prefix = effective_wine_prefix(dir);
 
         // Optional gamescope wrap (Linux). A 2008 wine game under a Wayland compositor
         // (Hyprland, etc.) hits transparency / wrong-monitor bugs and, on hybrid
