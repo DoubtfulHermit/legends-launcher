@@ -401,26 +401,31 @@ struct StatusOut { reachable: bool, gateway: bool, database: bool, game_server: 
 
 // Poll the gateway's public /status (CORS-open). Tries https then http so it works
 // whether `host` is a TLS domain (gw.…) or a bare IP on :80.
+// Off the UI thread (spawn_blocking): a sync command runs on the GTK main loop,
+// so a 2.5s×2 network wait every 12s froze the whole window. Now the blocking
+// HTTP runs on a worker; the webview stays responsive. Timeout trimmed too.
 #[tauri::command]
-fn status(host: String) -> StatusOut {
-    let host = host.trim().trim_end_matches('/');
-    if host.is_empty() { return StatusOut::default(); }
-    let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_millis(2500)).build();
-    for scheme in ["https", "http"] {
-        let url = format!("{scheme}://{host}/status");
-        if let Ok(resp) = agent.get(&url).call() {
-            if let Ok(v) = resp.into_json::<serde_json::Value>() {
-                let b = |k: &str| v.get(k).and_then(|x| x.as_bool()).unwrap_or(false);
-                return StatusOut {
-                    reachable: true,
-                    gateway: v.get("gateway").and_then(|x| x.as_bool()).unwrap_or(true),
-                    database: b("database"), game_server: b("game_server"),
-                    players: v.get("players").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
-                };
+async fn status(host: String) -> StatusOut {
+    tauri::async_runtime::spawn_blocking(move || {
+        let host = host.trim().trim_end_matches('/');
+        if host.is_empty() { return StatusOut::default(); }
+        let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_millis(1200)).build();
+        for scheme in ["https", "http"] {
+            let url = format!("{scheme}://{host}/status");
+            if let Ok(resp) = agent.get(&url).call() {
+                if let Ok(v) = resp.into_json::<serde_json::Value>() {
+                    let b = |k: &str| v.get(k).and_then(|x| x.as_bool()).unwrap_or(false);
+                    return StatusOut {
+                        reachable: true,
+                        gateway: v.get("gateway").and_then(|x| x.as_bool()).unwrap_or(true),
+                        database: b("database"), game_server: b("game_server"),
+                        players: v.get("players").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+                    };
+                }
             }
         }
-    }
-    StatusOut::default()
+        StatusOut::default()
+    }).await.unwrap_or_default()
 }
 
 // ---- content patcher --------------------------------------------------------
@@ -534,9 +539,11 @@ fn run_sync(host: &str, on_progress: impl Fn(SyncProgress)) -> SyncOut {
 }
 
 #[tauri::command]
-fn sync(app: tauri::AppHandle, host: String) -> SyncOut {
+async fn sync(app: tauri::AppHandle, host: String) -> SyncOut {
     use tauri::Emitter;
-    run_sync(&host, |p| { let _ = app.emit("sync-progress", p); })
+    tauri::async_runtime::spawn_blocking(move || {
+        run_sync(&host, |p| { let _ = app.emit("sync-progress", p); })
+    }).await.unwrap_or_default()
 }
 
 // Relaunch the app (kept for callers; no longer used by the update flow).
@@ -557,7 +564,8 @@ fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
 // to DOWNLOAD it manually (opens the download page). Reliable, no SmartScreen/lock
 // surprises.
 #[tauri::command]
-fn check_updates(host: String) -> UpdateCheck {
+async fn check_updates(host: String) -> UpdateCheck {
+    tauri::async_runtime::spawn_blocking(move || {
     let host = host.trim().trim_end_matches('/');
     if host.is_empty() { return UpdateCheck { error: Some("no server set".into()), ..Default::default() }; }
     let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(15)).build();
@@ -589,6 +597,7 @@ fn check_updates(host: String) -> UpdateCheck {
     }
     if !reached { out.ok = false; out.error = Some("update server unreachable".into()); }
     out
+    }).await.unwrap_or_default()
 }
 
 // ---- launcher self-update ---------------------------------------------------
@@ -649,8 +658,9 @@ fn swap_self(exe: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-fn self_update(host: String) -> SelfUpdateOut {
+// Sync worker: both the async `self_update` command (off the UI thread) and the
+// CLI `--self-update` path call this. Kept non-async so the CLI path needs no runtime.
+fn self_update_blocking(host: String) -> SelfUpdateOut {
     use std::io::Read;
     let host = host.trim().trim_end_matches('/');
     if host.is_empty() { return SelfUpdateOut::default(); }
@@ -685,6 +695,11 @@ fn self_update(host: String) -> SelfUpdateOut {
         Ok(()) => SelfUpdateOut { updated: true, version: Some(rel.version), error: None },
         Err(e) => SelfUpdateOut { error: Some(e), ..Default::default() },
     }
+}
+
+#[tauri::command]
+async fn self_update(host: String) -> SelfUpdateOut {
+    tauri::async_runtime::spawn_blocking(move || self_update_blocking(host)).await.unwrap_or_default()
 }
 
 // On a path like `…/<prefix>/drive_c/…`, return `<prefix>` so we can set WINEPREFIX
@@ -802,7 +817,8 @@ fn spawn_game(dir: &Path, exe_path: &Path, gamescope: bool, gamescope_args: &str
 }
 
 #[tauri::command]
-fn play(settings: Settings, windowed: bool, username: Option<String>, ticket: Option<String>) -> Result<(), String> {
+async fn play(settings: Settings, windowed: bool, username: Option<String>, ticket: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
     let dir = resolve_game_dir().ok_or("game folder not found")?;
     // The ⊡ Windowed button forces a window regardless of the Fullscreen toggle.
     let mut s = settings;
@@ -833,6 +849,7 @@ fn play(settings: Settings, windowed: bool, username: Option<String>, ticket: Op
     let windowed_exe = dir.join("AvatarMP_Windowed.exe");
     let target = if windowed_exe.is_file() { windowed_exe } else { dir.join("AvatarMP.exe") };
     spawn_game(&dir, &target, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen)
+    }).await.map_err(|e| e.to_string())?
 }
 
 // ---- remade menus (Tauri) ---------------------------------------------------
@@ -883,7 +900,8 @@ struct LoginOut {
 // auto-provisions unknown accounts, so a fresh name + password just works. Proxied
 // through Rust (not fetch) to reuse the https→http fallback and dodge webview CORS.
 #[tauri::command]
-fn gw_login(host: String, username: String, password: String) -> LoginOut {
+async fn gw_login(host: String, username: String, password: String) -> LoginOut {
+    tauri::async_runtime::spawn_blocking(move || {
     let host = host.trim().trim_end_matches('/');
     let username = username.trim();
     if host.is_empty() {
@@ -910,6 +928,7 @@ fn gw_login(host: String, username: String, password: String) -> LoginOut {
         }
     }
     LoginOut { error: Some("Couldn't reach the server.".into()), ..Default::default() }
+    }).await.unwrap_or_default()
 }
 
 // pull a simple "key":"value" string out of a flat JSON body (our fields have no escaping).
@@ -932,7 +951,8 @@ struct TicketOut {
 // gateway (POST /launcher/ticket). The launcher writes username + THIS ticket for the game —
 // never the password. The game logs in with it; the gateway consumes it once.
 #[tauri::command]
-fn gw_ticket(host: String, username: String, password: String) -> TicketOut {
+async fn gw_ticket(host: String, username: String, password: String) -> TicketOut {
+    tauri::async_runtime::spawn_blocking(move || {
     let host = host.trim().trim_end_matches('/');
     if host.is_empty() || username.trim().is_empty() {
         return TicketOut { error: Some("Not logged in.".into()), ..Default::default() };
@@ -957,6 +977,7 @@ fn gw_ticket(host: String, username: String, password: String) -> TicketOut {
         }
     }
     TicketOut { error: Some("Couldn't reach the server.".into()), ..Default::default() }
+    }).await.unwrap_or_default()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -981,7 +1002,7 @@ pub fn run() {
             .or_else(|| resolve_game_dir().map(|d| read_settings(&d).host).filter(|h| !h.is_empty()))
             .unwrap_or_else(|| "gw.legends-awakened.com".to_string());
         eprintln!("checking launcher update against {host} (running {}) …", env!("CARGO_PKG_VERSION"));
-        let out = self_update(host);
+        let out = self_update_blocking(host);
         println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
         std::process::exit(if out.error.is_none() { 0 } else { 1 });
     }
