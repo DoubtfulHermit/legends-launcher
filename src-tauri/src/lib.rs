@@ -58,7 +58,30 @@ fn cfg_home() -> Option<PathBuf> {
 }
 fn is_game_dir(p: &Path) -> bool { p.join("Config.ini").is_file() }
 
+// ── patched-clone model (see docs/handoff_patching.md) ───────────────────────
+// We never patch the player's ORIGINAL install (often in Program Files → needs
+// admin). We clone it once into a user-writable home and patch/run the clone.
+// Windows: %LOCALAPPDATA%\LegendsAwakened ; Unix: $XDG_DATA_HOME or ~/.local/share.
+fn app_home() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+        .or_else(|| std::env::var_os("XDG_DATA_HOME").map(PathBuf::from))
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share")))
+        .map(|d| d.join("LegendsAwakened"))
+}
+fn clone_dir() -> Option<PathBuf> { app_home().map(|d| d.join("game")) }
+fn clone_meta_path() -> Option<PathBuf> { app_home().map(|d| d.join("clone.state")) }
+
+// The dir the launcher PATCHES and RUNS from: the clone if it's a valid game dir,
+// otherwise the located original (pre-clone behaviour). Once cloned, every caller
+// (patcher, Config/arena writers, play) follows automatically.
 fn resolve_game_dir() -> Option<PathBuf> {
+    if let Some(c) = clone_dir() { if is_game_dir(&c) { return Some(c); } }
+    resolve_original_dir()
+}
+
+// Locate the player's ORIGINAL install (the clone source). AVATAR_GAME_DIR for dev,
+// the folder next to the exe, or a remembered user-picked dir.
+fn resolve_original_dir() -> Option<PathBuf> {
     if let Ok(d) = std::env::var("AVATAR_GAME_DIR") {
         let p = PathBuf::from(d);
         if is_game_dir(&p) { return Some(p); }
@@ -81,6 +104,69 @@ fn remember_game_dir(p: &Path) {
         if let Some(parent) = store.parent() { let _ = fs::create_dir_all(parent); }
         let _ = fs::write(store, p.to_string_lossy().as_bytes());
     }
+}
+
+// Cheap fingerprint of a source install so we re-clone only when the SOURCE changes:
+// "<path>|<AvatarMP.exe size>|<mtime>" — avoids hashing the whole multi-hundred-MB tree.
+fn source_fingerprint(dir: &Path) -> String {
+    let (size, mtime) = fs::metadata(dir.join("AvatarMP.exe")).map(|m| {
+        let t = m.modified().ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs()).unwrap_or(0);
+        (m.len(), t)
+    }).unwrap_or((0, 0));
+    format!("{}|{}|{}", dir.display(), size, mtime)
+}
+fn count_files(dir: &Path) -> u32 {
+    let mut n = 0;
+    if let Ok(rd) = fs::read_dir(dir) {
+        for e in rd.flatten() {
+            match e.file_type() {
+                Ok(ft) if ft.is_dir() => n += count_files(&e.path()),
+                Ok(ft) if ft.is_file() => n += 1,
+                _ => {}
+            }
+        }
+    }
+    n
+}
+// Recursively copy src→dst, overwriting (so a re-clone refreshes), reporting per file.
+fn copy_tree(src: &Path, dst: &Path, total: u32, done: &mut u32,
+             on: &dyn Fn(u32, u32, &str)) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ft = entry.file_type()?;
+        let (from, to) = (entry.path(), dst.join(entry.file_name()));
+        if ft.is_dir() {
+            copy_tree(&from, &to, total, done, on)?;
+        } else if ft.is_file() {
+            fs::copy(&from, &to)?;
+            *done += 1;
+            on(*done, total, &entry.file_name().to_string_lossy());
+        }
+    }
+    Ok(())
+}
+// Ensure a fresh clone of the original exists in the home. No-op when the clone is
+// present and its source fingerprint is unchanged. Returns the clone dir.
+fn ensure_clone(on: &dyn Fn(u32, u32, &str)) -> Result<PathBuf, String> {
+    let src = resolve_original_dir().ok_or("game folder not found")?;
+    let dst = clone_dir().ok_or("no home dir")?;
+    let meta = clone_meta_path().ok_or("no home dir")?;
+    let fp = source_fingerprint(&src);
+    if is_game_dir(&dst) {
+        if let Ok(prev) = fs::read_to_string(&meta) {
+            if prev.trim() == fp { return Ok(dst); }   // already current
+        }
+    }
+    if let Some(parent) = dst.parent() { let _ = fs::create_dir_all(parent); }
+    let total = count_files(&src);
+    let mut done = 0u32;
+    on(0, total, "");
+    copy_tree(&src, &dst, total, &mut done, on).map_err(|e| format!("clone copy: {e}"))?;
+    let _ = fs::write(&meta, &fp);
+    Ok(dst)
 }
 
 // Per-user launcher prefs that don't belong in the game's own config files (gamescope
@@ -578,6 +664,26 @@ async fn sync(app: tauri::AppHandle, host: String) -> SyncOut {
     }).await.unwrap_or_default()
 }
 
+#[derive(Serialize, Default)]
+struct CloneOut { ok: bool, dir: Option<String>, error: Option<String> }
+
+// First-run / re-clone: copy the player's ORIGINAL install into the user-writable
+// home so we patch + run from there (no admin, non-destructive). No-op when the
+// clone is already current. Emits "clone-progress" {done,total,file}.
+#[tauri::command]
+async fn prepare_clone(app: tauri::AppHandle) -> CloneOut {
+    use tauri::Emitter;
+    tauri::async_runtime::spawn_blocking(move || {
+        let on = |done: u32, total: u32, file: &str| {
+            let _ = app.emit("clone-progress", SyncProgress { done, total, file: file.to_string() });
+        };
+        match ensure_clone(&on) {
+            Ok(dir) => CloneOut { ok: true, dir: Some(dir.to_string_lossy().into_owned()), error: None },
+            Err(e) => CloneOut { ok: false, dir: None, error: Some(e) },
+        }
+    }).await.unwrap_or_default()
+}
+
 // Relaunch the app (kept for callers; no longer used by the update flow).
 #[tauri::command]
 fn restart(app: tauri::AppHandle) { app.restart(); }
@@ -1061,7 +1167,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, check_updates, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
