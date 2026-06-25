@@ -207,6 +207,8 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
     radial-gradient(80% 60% at 50% 0%, rgba(var(--ember-rgb),.18), transparent 60%);
   backdrop-filter:blur(7px);transition:opacity .4s}
 .login.hide{opacity:0;pointer-events:none}
+#cloneWizard{z-index:38}   /* first-run clone wizard sits just under the login gate */
+#cloneWizard .modal-progress{display:block;margin:0 0 12px}
 .login .lcard{width:362px;padding:30px 30px 24px;border-radius:16px;background:var(--panel);
   border:1px solid var(--bd);box-shadow:0 30px 80px rgba(0,0,0,.6)}
 .login .mark{text-align:center;margin-bottom:22px}

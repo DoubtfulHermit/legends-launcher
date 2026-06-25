@@ -42,6 +42,9 @@ struct LoadResult {
     hd_available: bool,         // both Textures.original/ and Textures.hd/ exist
     gamescope_available: bool,  // Linux + gamescope on PATH (so the toggle is usable)
     version: String,            // launcher version (CARGO_PKG_VERSION), shown in the UI
+    cloned: bool,               // a user-writable patched clone exists
+    needs_clone: bool,          // an original is located but not yet cloned → show the first-run wizard
+    original_dir: Option<String>, // the located original install (the clone source), for display
 }
 
 // ---- locating the game install ----------------------------------------------
@@ -450,6 +453,12 @@ fn load(app: tauri::AppHandle) -> LoadResult {
     let native = app.primary_monitor().ok().flatten()
         .map(|m| { let s = m.size(); [s.width, s.height] }).unwrap_or([0, 0]);
     let gs = gamescope_available();
+    // clone state (see docs/handoff_patching.md): an original located but not yet
+    // cloned → first-run wizard; once cloned, resolve_game_dir() returns the clone.
+    let cloned = clone_dir().map(|c| is_game_dir(&c)).unwrap_or(false);
+    let original = resolve_original_dir();
+    let original_dir = original.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let needs_clone = original.is_some() && !cloned;
     match resolve_game_dir() {
         Some(dir) => {
             let mut settings = read_settings(&dir);
@@ -458,7 +467,7 @@ fn load(app: tauri::AppHandle) -> LoadResult {
             let resolutions = resolution_list(native, [settings.width, settings.height]);
             LoadResult { found: true, game_dir: Some(dir.to_string_lossy().into()), settings,
                          native, resolutions, hd_available: hd_available(&dir), gamescope_available: gs,
-                         version: env!("CARGO_PKG_VERSION").into() }
+                         version: env!("CARGO_PKG_VERSION").into(), cloned, needs_clone, original_dir }
         }
         None => {
             let mut settings = Settings::default();
@@ -466,7 +475,7 @@ fn load(app: tauri::AppHandle) -> LoadResult {
             let resolutions = resolution_list(native, [settings.width, settings.height]);
             LoadResult { found: false, game_dir: None, settings, native, resolutions,
                          hd_available: false, gamescope_available: gs,
-                         version: env!("CARGO_PKG_VERSION").into() }
+                         version: env!("CARGO_PKG_VERSION").into(), cloned, needs_clone, original_dir }
         }
     }
 }

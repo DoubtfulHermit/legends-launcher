@@ -157,6 +157,28 @@
     </div>
   </div>
 
+  <!-- first-run setup: clone the player's game into a user-writable folder (no admin) -->
+  <div class="login" id="cloneWizard" style="display:none">
+    <div class="lcard">
+      <div class="mark">
+        <svg class="el em"><use href="#el-fire"/></svg>
+        <div class="t">FIRST-TIME&nbsp;SETUP</div>
+        <div class="s">One-time &middot; about a minute</div>
+      </div>
+      <p style="font-size:13px;color:var(--mut);line-height:1.55;margin-bottom:16px">
+        We make a patched copy of your game in your user folder, so your original install stays
+        <b style="color:var(--bone)">untouched</b> and <b style="color:var(--bone)">no administrator</b>
+        permission is ever needed.</p>
+      <div class="modal-progress" id="czProg" hidden>
+        <div class="bar"><div class="bar-fill" id="czFill"></div></div>
+        <div class="bar-label" id="czLabel">Starting&hellip;</div>
+      </div>
+      <div class="err" id="czErr"></div>
+      <button class="btn" id="czGo">Set up &amp; play &#9658;</button>
+      <div class="hint" id="czFrom"></div>
+    </div>
+  </div>
+
   <!-- toast -->
   <div class="toast" id="toast"></div>
 

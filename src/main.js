@@ -9,6 +9,7 @@ const getWin = () => (TAURI.window && TAURI.window.getCurrentWindow) ? TAURI.win
 // Browser-preview fallbacks so the page renders without a backend.
 const FALLBACK = {
   load: { found:true, game_dir:'(preview)', version:'1.12', native:[1920,1080],
+    cloned:true, needs_clone:false, original_dir:'(preview)',
     resolutions:[[1024,768],[1280,960],[1440,1080],[1600,1200],[1920,1440]],
     hd_available:true, gamescope_available:false,
     settings:{ host:'', room:'', queue:4, fullscreen:true, width:1440, height:1080,
@@ -46,6 +47,7 @@ function persist(){ try{ localStorage.setItem(SAVE_KEY, JSON.stringify(SAVE)); }
 
 // backend capability flags (from `load`)
 let found = false, hdAvailable = false, gsAvailable = false;
+let needsClone = false, cloning = false;   // first-run patched-clone setup
 let native = [0,0], resolutions = [], appVersion = '';
 let sessionPass = '';   // in-memory only, for minting the seamless login ticket
 
@@ -352,7 +354,35 @@ async function refresh(){
   $('liServer').value = SAVE.session ? SAVE.session.server : SAVE.settings.server;
   if(found){ setPlayLabel('PLAY'); $('play').disabled=false; }
   else { setPlayLabel('LOCATE GAME'); $('play').disabled=false; toast('Game folder not found — click LOCATE GAME to pick it.','err'); }
+  // First-run: an original is located but not yet cloned → show the setup wizard. Its
+  // full-screen overlay also gates PLAY (so we never launch/patch the un-cloned original).
+  needsClone = !!r.needs_clone;
+  $('czFrom').textContent = r.original_dir ? ('Your game: ' + r.original_dir) : '';
+  $('cloneWizard').style.display = needsClone ? 'grid' : 'none';
 }
+
+// First-run setup: clone the player's game into a user-writable folder (no admin),
+// streaming clone-progress into the wizard, then re-load so PLAY targets the clone.
+async function startClone(){
+  if(cloning) return; cloning = true;
+  $('czErr').textContent=''; $('czGo').disabled=true; $('czGo').textContent='Setting up…';
+  $('czProg').hidden=false; $('czFill').style.width='0%'; $('czLabel').textContent='Starting…';
+  let unlisten=null;
+  try{
+    const EVT=TAURI.event;
+    if(EVT && EVT.listen){ unlisten=await EVT.listen('clone-progress', ev=>{ const p=ev.payload||{};
+      const pct=p.total?Math.round((p.done/p.total)*100):0; $('czFill').style.width=pct+'%';
+      const name=(p.file||'').replace(/^.*[\\/]/,''); $('czLabel').textContent=p.total?`Copying ${p.done}/${p.total}${name?' · '+name:''}`:'Copying…'; }); }
+    const r=await invoke('prepare_clone');
+    if(r && r.ok){
+      $('czFill').style.width='100%'; $('czLabel').textContent='Done!';
+      toast('Setup complete — your patched copy is ready.','ok');
+      setTimeout(async ()=>{ $('cloneWizard').style.display='none'; await refresh(); }, 700);
+    } else { $('czErr').textContent=(r && r.error)||'Setup failed.'; $('czGo').disabled=false; $('czGo').textContent='Retry ▶'; }
+  }catch(e){ $('czErr').textContent=String(e); $('czGo').disabled=false; $('czGo').textContent='Retry ▶'; }
+  finally{ if(typeof unlisten==='function') unlisten(); cloning=false; }
+}
+$('czGo').addEventListener('click', startClone);
 
 // ── leaderboard ──────────────────────────────────────────────────────────────
 // REAL WIRING: replace DEMO_BOARD with `await invoke('leaderboard',{host})` once
