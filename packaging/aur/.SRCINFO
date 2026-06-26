@@ -10,7 +10,9 @@ pkgbase = legends-awakened-launcher-bin
 	depends = libayatana-appindicator
 	provides = legends-awakened-launcher
 	conflicts = legends-awakened-launcher
-	source = legends-awakened-launcher-bin-0.1.21.deb::https://github.com/DoubtfulHermit/legends-launcher/releases/download/v0.1.19/Legends.Awakened.Launcher_0.1.19_amd64.deb
+	options = !strip
+	options = !debug
+	source = legends-awakened-launcher-bin-0.1.21.deb::https://github.com/DoubtfulHermit/legends-launcher/releases/download/v0.1.21/Legends.Awakened.Launcher_0.1.21_amd64.deb
 	sha256sums = SKIP
 
 pkgname = legends-awakened-launcher-bin
