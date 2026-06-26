@@ -1298,6 +1298,93 @@ async fn friends_recent(host: String, token: String) -> serde_json::Value {
     ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
 }
 
+// percent-encode a query-string value (screen names / match uids can hold non-alnum)
+fn qenc(s: &str) -> String {
+    s.bytes().map(|b| match b {
+        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+        _ => format!("%{:02X}", b),
+    }).collect()
+}
+
+// ── stats: leaderboard / career / match history + replay (public GET reads) ────
+#[tauri::command]
+async fn leaderboard(host: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "GET", "/leaderboard", None, serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn career(host: String, name: String) -> serde_json::Value {
+    let path = format!("/career?name={}", qenc(&name));
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "GET", &path, None, serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn matches_recent(host: String, name: String) -> serde_json::Value {
+    let path = format!("/matches/recent?name={}", qenc(&name));
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "GET", &path, None, serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn match_replay(host: String, uid: String) -> serde_json::Value {
+    let path = format!("/match/{}/replay", qenc(&uid));
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "GET", &path, None, serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+// ── parties: group up + queue together ────────────────────────────────────────
+fn party_post(host: String, token: String, path: &'static str, body: serde_json::Value)
+    -> tauri::async_runtime::JoinHandle<serde_json::Value> {
+    tauri::async_runtime::spawn_blocking(move || gw_json(&host, "POST", path, Some(&token), body))
+}
+#[tauri::command]
+async fn party_get(host: String, token: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "GET", "/party/get", Some(&token), serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn party_create(host: String, token: String, size: u32) -> serde_json::Value {
+    party_post(host, token, "/party/create", serde_json::json!({"size": size}))
+        .await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn party_invite(host: String, token: String, to: String) -> serde_json::Value {
+    party_post(host, token, "/party/invite", serde_json::json!({"to": to}))
+        .await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn party_join(host: String, token: String, party: String) -> serde_json::Value {
+    party_post(host, token, "/party/join", serde_json::json!({"party_id": party}))
+        .await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn party_leave(host: String, token: String) -> serde_json::Value {
+    party_post(host, token, "/party/leave", serde_json::json!({}))
+        .await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn party_ready(host: String, token: String, ready: bool) -> serde_json::Value {
+    party_post(host, token, "/party/ready", serde_json::json!({"ready": ready}))
+        .await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn party_kick(host: String, token: String, who: String) -> serde_json::Value {
+    party_post(host, token, "/party/kick", serde_json::json!({"who": who}))
+        .await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn party_start(host: String, token: String) -> serde_json::Value {
+    party_post(host, token, "/party/start", serde_json::json!({}))
+        .await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // WebKitGTK on Linux renders a grey/blank window when its DMABUF renderer can't
@@ -1340,7 +1427,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, invite_send, invite_respond, friends_recent])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, invite_send, invite_respond, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

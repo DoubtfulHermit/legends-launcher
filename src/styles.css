@@ -479,3 +479,65 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
 /* Match/Training: small hint under the card pointing at the contextual Play button */
 .m-hint{font-size:12px;color:var(--mut)}
 .m-hint b{color:var(--gold)}
+
+/* ── leaderboard: wins sub-stat + "you" highlight (real data) ── */
+.lb-w{margin-left:8px;font-size:10px;font-weight:800;color:var(--smoke);letter-spacing:.02em}
+.lb-row.me{background:rgba(var(--ember-rgb),.16);border-color:rgba(var(--ember-rgb),.42)}
+.lb-row.me .lb-name{color:var(--gold)}
+
+/* ── career stats inside the profile popover ── */
+.fr-profile .pmatch-h{margin:10px 2px 6px;font-size:9px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--smoke)}
+.fr-profile .pmatches{display:flex;flex-direction:column;gap:4px;margin-bottom:4px}
+.fr-profile .pmatch{display:flex;align-items:center;gap:9px;padding:6px 8px;border:1px solid var(--bd);border-radius:9px;
+  background:rgba(255,255,255,.02);color:var(--bone);font:inherit;font-size:11.5px;cursor:pointer;text-align:left}
+.fr-profile .pmatch:hover{border-color:rgba(var(--ember-rgb),.5)}
+.fr-profile .pmatch i{font-style:normal;width:18px;height:18px;border-radius:5px;display:grid;place-items:center;font-size:10px;font-weight:800;color:#fff}
+.fr-profile .pmatch.win i{background:rgba(82,224,138,.85)} .fr-profile .pmatch.loss i{background:rgba(248,81,73,.7)}
+.fr-profile .pmatch span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fr-profile .pmatch small{color:var(--smoke)}
+
+/* ── match replay modal ── */
+.replay{position:fixed;inset:0;z-index:52;display:grid;place-items:center;background:rgba(5,4,8,.72);backdrop-filter:blur(4px)}
+.replay[hidden]{display:none}
+.rv-card{position:relative;width:720px;max-width:94vw;padding:20px;border-radius:16px;
+  background:linear-gradient(180deg,#15101c,#0c0812);border:1px solid var(--bd);box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.rv-x{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:8px;border:1px solid var(--bd);
+  background:transparent;color:var(--mut);cursor:pointer;font-size:13px}
+.rv-x:hover{color:var(--bone);background:rgba(255,255,255,.06)}
+.rv-title{font-family:Cinzel,serif;font-weight:900;letter-spacing:.12em;font-size:16px}
+.rv-meta{font-size:12px;color:var(--mut);margin:4px 0 12px}
+.rv-canvas{width:100%;height:auto;display:block;border-radius:12px;border:1px solid var(--bd);
+  background:radial-gradient(120% 100% at 50% 0%,rgba(var(--ember-rgb),.07),transparent 60%),#0a0710}
+.rv-bar{display:flex;align-items:center;gap:12px;margin-top:12px}
+.rv-play{width:38px;height:34px;border:0;border-radius:9px;cursor:pointer;font-size:13px;color:#fff;
+  background:linear-gradient(180deg,var(--ember),var(--ember2))}
+.rv-seek{flex:1;accent-color:var(--ember);height:4px}
+.rv-time{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums;min-width:38px;text-align:right}
+
+/* ── party block (top of the friends panel) ── */
+.fr-party:empty{display:none}
+.party{display:flex;flex-direction:column;gap:4px;padding:9px;border-radius:11px;
+  background:rgba(var(--ember-rgb),.08);border:1px solid rgba(var(--ember-rgb),.3)}
+.party-head{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.party-head .pt{font-family:Cinzel,serif;font-weight:700;font-size:11px;letter-spacing:.2em;color:var(--gold)}
+.party-head .pc{font-size:10px;color:var(--mut);font-weight:700}
+.party-leave{margin-left:auto;height:22px;padding:0 9px;border:1px solid var(--bd);border-radius:999px;background:transparent;
+  color:var(--mut);font:inherit;font-size:10px;font-weight:800;cursor:pointer}
+.party-leave:hover{color:#ff9b8f;border-color:rgba(248,81,73,.4)}
+.party-m{display:flex;align-items:center;gap:8px;padding:4px 5px;border-radius:8px;position:relative}
+.party-m .fr-av{width:24px;height:24px;font-size:10px}
+.party-m .dot{position:absolute;left:24px;top:21px;width:8px;height:8px;border-radius:50%;background:var(--smoke);border:2px solid #15101c}
+.party-m.online .dot{background:var(--good)} .party-m.in-game .dot{background:var(--gold)} .party-m.away .dot{background:var(--away)}
+.party-m .nm{flex:1;font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.party-m.pending{opacity:.6}
+.party-m .crown{font-size:11px}
+.party-m .rd{font-size:9.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--smoke)}
+.party-m .rd.on{color:var(--good)}
+.party-m .kick{width:20px;height:20px;border:0;border-radius:6px;background:transparent;color:var(--smoke);cursor:pointer;font-size:11px}
+.party-m .kick:hover{background:rgba(248,81,73,.22);color:#ff9b8f}
+.party-acts{display:flex;gap:6px;margin-top:5px}
+.party-acts .pa{flex:1;height:30px;border:1px solid var(--bd);border-radius:8px;background:rgba(255,255,255,.04);
+  color:var(--bone);font:inherit;font-size:11.5px;font-weight:800;cursor:pointer}
+.party-acts .pa.rdy.on{border-color:transparent;background:rgba(82,224,138,.22);color:var(--good)}
+.party-acts .pa.go{background:linear-gradient(180deg,var(--ember),var(--ember2));border-color:transparent;color:#fff}
+.fr-invite.party{background:rgba(255,170,90,.13);border-color:rgba(var(--ember-rgb),.4)}

@@ -428,6 +428,7 @@ function openMenu(f, anchor){
   _ensureLayers(); _profile.hidden=true;
   const items=[
     ['⚔','Invite to a match', ()=>inviteFriend(f)],
+    ['🎉','Invite to party', ()=>partyInvite(f.name)],
     [f.favorite?'★':'☆', f.favorite?'Remove favorite':'Add favorite', ()=>toggleFav(f)],
     ['✎','Set nickname', ()=>openNickname(f)],
     ['👤','View profile', ()=>openProfile(f)],
@@ -463,11 +464,13 @@ function openProfile(f){
   addr('Status', STATE_WORD[f.state]||'Offline');
   if(f.last_seen) addr('Last seen', relTime(f.last_seen));
   if(f.since) addr('Friends since', new Date(Number(f.since)*1000).toLocaleDateString());
+  _fillCareer(p, f.name);                         // async: append W/L · K/D · streak + recent matches
   p.querySelector('.inv').onclick=()=>{ closeMenus(); inviteFriend(f); };
   p.querySelector('.fav').onclick=()=>{ toggleFav(f); };
   p.querySelector('.nick').onclick=()=>{ openNickname(f); };
   p.querySelector('.rem').onclick=()=>{ closeMenus(); removeFriend(f.name); };
   p.querySelector('.blk').onclick=()=>{ closeMenus(); blockFriend(f.name); };
+  if(f.self){ const a=p.querySelector('.pacts'), b=p.querySelector('.pacts2'); if(a)a.remove(); if(b)b.remove(); }
   // center it within the friends panel
   const host=$('friends').getBoundingClientRect();
   p.hidden=false;
@@ -896,18 +899,18 @@ $('czGo').addEventListener('click', startClone);
 // REAL WIRING: replace DEMO_BOARD with `await invoke('leaderboard',{host})` once
 // the gateway exposes a ranks endpoint — same {name,nation,rating,solo} shape.
 const DEMO_BOARD = [
-  {name:'Zenith',     nation:'fire',  rating:2480, solo:2240},
-  {name:'KorraMain',  nation:'water', rating:2415, solo:2310},
-  {name:'BoulderKing',nation:'earth', rating:2388, solo:2090},
-  {name:'Zephyra',    nation:'air',   rating:2351, solo:2402},
-  {name:'AshRider',   nation:'fire',  rating:2290, solo:2155},
-  {name:'TidebornNn', nation:'water', rating:2244, solo:2188},
-  {name:'GraniteFist',nation:'earth', rating:2201, solo:1990},
-  {name:'GaleStorm',  nation:'air',   rating:2177, solo:2260},
-  {name:'Inferna',    nation:'fire',  rating:2120, solo:2305},
-  {name:'FrostByte',  nation:'water', rating:2088, solo:2044},
-  {name:'TerraNova',  nation:'earth', rating:2050, solo:2130},
-  {name:'SkyDancer',  nation:'air',   rating:2012, solo:1975},
+  {name:'Zenith',     nation:'fire',  rating:2480, wins:31, solo:2240},
+  {name:'KorraMain',  nation:'water', rating:2415, wins:28, solo:2310},
+  {name:'BoulderKing',nation:'earth', rating:2388, wins:25, solo:2090},
+  {name:'Aang',       nation:'air',   rating:2351, wins:23, solo:2402},
+  {name:'AshRider',   nation:'fire',  rating:2290, wins:21, solo:2155},
+  {name:'TidebornNn', nation:'water', rating:2244, wins:19, solo:2188},
+  {name:'GraniteFist',nation:'earth', rating:2201, wins:17, solo:1990},
+  {name:'GaleStorm',  nation:'air',   rating:2177, wins:16, solo:2260},
+  {name:'Inferna',    nation:'fire',  rating:2120, wins:14, solo:2305},
+  {name:'FrostByte',  nation:'water', rating:2088, wins:12, solo:2044},
+  {name:'TerraNova',  nation:'earth', rating:2050, wins:11, solo:2130},
+  {name:'SkyDancer',  nation:'air',   rating:2012, wins:9,  solo:1975},
 ];
 let boardData = DEMO_BOARD;
 const cap = s => s.charAt(0).toUpperCase()+s.slice(1);
@@ -947,8 +950,11 @@ function renderBoard(){
     const ico = document.createElementNS('http://www.w3.org/2000/svg','svg'); ico.setAttribute('class','el el-'+r.nation+' lb-el');
     const use = document.createElementNS('http://www.w3.org/2000/svg','use'); use.setAttribute('href','#el-'+r.nation); ico.appendChild(use);
     const nm = document.createElement('span'); nm.className='lb-name'; nm.textContent=r.name;   // textContent → no HTML injection
+    if(r.wins!=null && SAVE.board.mode!=='dominance'){ const w=document.createElement('span'); w.className='lb-w';
+      w.textContent=r.wins+'W'; nm.appendChild(w); }
     const val = document.createElement('span'); val.className='lb-val'; val.textContent=r.value;
     row.append(rank, ico, nm, val); frag.appendChild(row);
+    if(SAVE.session && r.name===SAVE.session.name) row.classList.add('me');
   }
   host.appendChild(frag);
 }
@@ -960,8 +966,9 @@ $('lbNations').addEventListener('click', e=>{ const s=e.target.closest('.el'); i
   SAVE.board.nation=/el-(\w+)/.exec(s.getAttribute('class'))[1]; persist(); renderBoard(); });
 async function loadBoard(){
   const host=(SAVE.settings.server||'').trim();
-  try{ const r=await invoke('leaderboard',{ host }); if(Array.isArray(r) && r.length) boardData=r; }
-  catch{ /* no gateway endpoint yet — keep demo data */ }
+  try{ const r=await invoke('leaderboard',{ host });
+    const b=(r && r.board)||(Array.isArray(r)?r:null); if(b && b.length) boardData=b; }
+  catch{ /* gateway unreachable — keep demo data */ }
   renderBoard();
 }
 
@@ -997,6 +1004,213 @@ updateCTA();   // Home → the bottom button reads "MATCH"
 refresh().then(()=>{ pollStatus(); checkForUpdates(false); checkLauncherUpdate(); loadBoard(); });
 setInterval(pollStatus, 12000);
 
+// ════════════════════════════════════════════════════════════════════════════
+//  Career stats (#2) · Match replay (#5) · Parties (#3)
+// ════════════════════════════════════════════════════════════════════════════
+const NAT_COL = { 1:'#a3c14a', 2:'#ff5a0a', 3:'#4aa8ff', 4:'#b6e3dc' };   // earth/fire/water/air
+function fmtDur(s){ s=Math.max(0,Math.round(s||0)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
+
+// ── career card — fills the profile popover with real match stats + recent matches ──
+async function _fillCareer(p, name){
+  const rows=p.querySelector('.prows'); if(!rows) return;
+  let r; try{ r=await invoke('career',{ host:_srv(), name }); }catch{ r=null; }
+  if(!r || !r.ok) return;
+  const stat=(k,v)=>{ const d=document.createElement('div'); d.className='prow'; d.innerHTML=`<span>${k}</span><b></b>`;
+    d.querySelector('b').textContent=v; rows.appendChild(d); };
+  if(r.matches){
+    stat('Record', `${r.wins}W · ${r.losses}L  (${r.winrate}%)`);
+    stat('K / D', `${r.kills} / ${r.deaths}  (${r.kd})`);
+    stat('Damage dealt', Number(r.damage||0).toLocaleString());
+    if(r.streak>1) stat('Win streak', '🔥 '+r.streak);
+    stat('Rating', r.rating);
+  } else { stat('Matches', 'No ranked matches yet'); }
+  if(r.recent && r.recent.length){
+    const h=document.createElement('div'); h.className='pmatch-h'; h.textContent='Recent matches — click to watch'; rows.appendChild(h);
+    const list=document.createElement('div'); list.className='pmatches';
+    for(const m of r.recent.slice(0,5)){
+      const it=document.createElement('button'); it.className='pmatch '+m.result;
+      it.innerHTML=`<i>${m.result==='win'?'W':'L'}</i><span></span><small>${m.when?relTime(m.when):''}</small>`;
+      it.querySelector('span').textContent=`${m.players||2}-player · ${m.end_reason||'match'}`;
+      it.onclick=()=>openReplay(m.uid);
+      list.appendChild(it);
+    }
+    rows.appendChild(list);
+  }
+}
+function openMyCareer(){ if(!SAVE.session) return; acctMenu.classList.remove('open');
+  openProfile({ name:SAVE.session.name, state:'online', self:true }); }
+$('amCareer').addEventListener('click', openMyCareer);
+
+// ── match replay — 2D top-down playback on a canvas ──
+let _rv=null, _rvState=null;
+function _replayEl(){
+  if(_rv) return _rv;
+  _rv=document.createElement('div'); _rv.className='replay'; _rv.hidden=true;
+  _rv.innerHTML=`<div class="rv-card"><button class="rv-x" title="Close">✕</button>
+    <div class="rv-title">Match Replay</div><div class="rv-meta" id="rvMeta"></div>
+    <canvas class="rv-canvas" width="660" height="380"></canvas>
+    <div class="rv-bar"><button class="rv-play" title="Play/Pause">❚❚</button>
+      <input type="range" class="rv-seek" min="0" max="1000" value="0">
+      <span class="rv-time">0:00</span></div></div>`;
+  document.body.appendChild(_rv);
+  _rv.querySelector('.rv-x').onclick=closeReplay;
+  _rv.addEventListener('click', e=>{ if(e.target===_rv) closeReplay(); });
+  return _rv;
+}
+function closeReplay(){ if(_rvState){ cancelAnimationFrame(_rvState.raf); _rvState=null; } if(_rv) _rv.hidden=true; }
+async function openReplay(uid){
+  const el=_replayEl(); el.hidden=false; closeMenus();
+  el.querySelector('#rvMeta').textContent='Loading replay…';
+  let r; try{ r=await invoke('match_replay',{ host:_srv(), uid }); }catch{ r=null; }
+  if(!r || !r.ok || !(r.frames||[]).length){ el.querySelector('#rvMeta').textContent='No replay data for this match.'; return; }
+  _rvSetup(el, r);
+}
+function _rvSetup(el, data){
+  const cv=el.querySelector('.rv-canvas'), ctx=cv.getContext('2d');
+  const W=cv.width, H=cv.height, pad=46;
+  let minx=1e9,maxx=-1e9,minz=1e9,maxz=-1e9;
+  for(const f of data.frames) for(const p of (f.players||[])){
+    minx=Math.min(minx,p.x); maxx=Math.max(maxx,p.x); minz=Math.min(minz,p.z); maxz=Math.max(maxz,p.z); }
+  if(minx>maxx){ minx=minz=-10; maxx=maxz=10; }
+  const cx=(minx+maxx)/2, cz=(minz+maxz)/2, span=Math.max(1,Math.max(maxx-minx,maxz-minz))*1.15;
+  const scale=(Math.min(W,H)-pad*2)/span;
+  const px=x=> W/2+(x-cx)*scale, py=z=> H/2+(z-cz)*scale;
+  const dur=data.frames[data.frames.length-1].t || data.meta.duration || 1;
+  const win=(data.meta.winners||[]);
+  el.querySelector('#rvMeta').textContent=`${data.meta.players||'?'} players · ${fmtDur(data.meta.duration||dur)}`
+    +(win.length?`  ·  🏆 ${win.join(', ')}`:'');
+  const seek=el.querySelector('.rv-seek'), playBtn=el.querySelector('.rv-play'), timeEl=el.querySelector('.rv-time');
+  const state={ data,ctx,W,H,px,py,dur,t:0,playing:true,raf:0,last:performance.now() }; _rvState=state;
+  playBtn.textContent='❚❚';
+  playBtn.onclick=()=>{ state.playing=!state.playing; playBtn.textContent=state.playing?'❚❚':'▶'; state.last=performance.now(); };
+  seek.oninput=()=>{ state.t=(+seek.value/1000)*dur; state.playing=false; playBtn.textContent='▶'; };
+  function frameAt(t){
+    const fr=state.data.frames; let i=0; while(i<fr.length-1 && fr[i+1].t<=t) i++;
+    const a=fr[i], b=fr[Math.min(fr.length-1,i+1)], dn=Math.max(1e-3,b.t-a.t), u=Math.max(0,Math.min(1,(t-a.t)/dn));
+    const bm={}; for(const p of (b.players||[])) bm[p.n]=p;
+    return (a.players||[]).map(p=>{ const q=bm[p.n]||p; return {...p, x:p.x+(q.x-p.x)*u, z:p.z+(q.z-p.z)*u}; });
+  }
+  function render(){
+    ctx.clearRect(0,0,W,H);
+    ctx.beginPath(); ctx.arc(W/2,H/2,Math.min(W,H)/2-pad/2,0,Math.PI*2);
+    ctx.fillStyle='rgba(255,255,255,.025)'; ctx.fill(); ctx.strokeStyle='rgba(255,170,90,.12)'; ctx.lineWidth=1; ctx.stroke();
+    const players=frameAt(state.t);
+    for(const e of state.data.events){ const dt=(e.t||0)-state.t; if(dt<=0 && dt>-0.45){
+      const tgt=players.find(p=>p.n===e.target)||players.find(p=>p.n===e.actor); if(!tgt) continue;
+      const X=px(tgt.x),Y=py(tgt.z), a=1+dt/0.45;
+      if(e.kind==='kill'){ ctx.globalAlpha=a; ctx.strokeStyle='#ff5a0a'; ctx.lineWidth=2.5;
+        ctx.beginPath(); ctx.arc(X,Y,18*(1.3-a),0,Math.PI*2); ctx.stroke(); ctx.globalAlpha=1; }
+      else if(e.kind==='hit'){ ctx.globalAlpha=a*.6; ctx.fillStyle='#fff';
+        ctx.beginPath(); ctx.arc(X,Y,5,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; } } }
+    for(const p of players){
+      const X=px(p.x), Y=py(p.z), col=NAT_COL[p.f]||'#bbb';
+      ctx.globalAlpha = p.d?0.35:1;
+      ctx.beginPath(); ctx.arc(X,Y,8,0,Math.PI*2); ctx.fillStyle=col; ctx.fill();
+      ctx.lineWidth=2; ctx.strokeStyle='rgba(0,0,0,.55)'; ctx.stroke();
+      const hp=p.hm?Math.max(0,Math.min(1,p.h/p.hm)):1;
+      ctx.fillStyle='rgba(0,0,0,.55)'; ctx.fillRect(X-13,Y-17,26,3.5);
+      ctx.fillStyle= hp>.5?'#52e08a':hp>.25?'#e0a93a':'#f85149'; ctx.fillRect(X-13,Y-17,26*hp,3.5);
+      ctx.globalAlpha=1; ctx.fillStyle='rgba(244,236,224,.92)'; ctx.font='10px Inter,system-ui,sans-serif'; ctx.textAlign='center';
+      ctx.fillText(p.n, X, Y+22);
+    }
+  }
+  function loop(now){
+    if(state!==_rvState) return;
+    if(state.playing){ state.t+=(now-state.last)/1000; if(state.t>=dur){ state.t=dur; state.playing=false; playBtn.textContent='▶'; } }
+    state.last=now; seek.value=Math.round(state.t/dur*1000); timeEl.textContent=fmtDur(state.t); render();
+    state.raf=requestAnimationFrame(loop);
+  }
+  state.raf=requestAnimationFrame(loop);
+}
+
+// ── parties — group block in the friends panel, polled separately ──
+let partyData=null, _partyTimer=null, _lastGo=0;
+async function pollParty(){
+  if(!_tok()){ renderParty(null,null); return; }
+  let r; try{ r=await invoke('party_get',{ host:_srv(), token:_tok() }); }catch{ return; }
+  if(!r || !r.ok) return;
+  partyData=r.party; renderParty(r.party, r.invite);
+  if(r.party && r.party.status==='go' && r.party.go_at>_lastGo){
+    _lastGo=r.party.go_at; toast('Party starting — queuing you in…','ok'); play(r.party.room_code, r.party.size);
+  }
+}
+function startPartyPoll(){ if(_partyTimer) return; pollParty(); _partyTimer=setInterval(()=>{ if(!document.hidden) pollParty(); }, 5000); }
+function renderParty(party, invite){
+  const host=$('frParty'); if(!host) return; host.innerHTML='';
+  if(invite){
+    const el=document.createElement('div'); el.className='fr-invite party';
+    el.innerHTML=avatarHTML(invite.from)+`<div class="meta"><b></b><small>invites you to their party · ${invite.size||4}-player</small></div>`
+      +`<button class="ok">Join</button><button class="no">✕</button>`;
+    el.querySelector('b').textContent=invite.from;
+    el.querySelector('.ok').onclick=()=>partyJoin(invite.party_id);
+    el.querySelector('.no').onclick=()=>{};   // ignore (invite expires)
+    host.appendChild(el);
+  }
+  if(!party) return;
+  const wrap=document.createElement('div'); wrap.className='party';
+  const head=document.createElement('div'); head.className='party-head';
+  head.innerHTML=`<span class="pt">PARTY</span><span class="pc">${party.members.length}/${party.size}</span>`
+    +`<button class="party-leave" title="Leave party">Leave</button>`;
+  head.querySelector('.party-leave').onclick=partyLeave; wrap.appendChild(head);
+  for(const m of party.members){
+    const row=document.createElement('div'); row.className='party-m '+(m.state||'offline');
+    row.innerHTML=avatarHTML(m.name)+`<span class="dot"></span><b class="nm"></b>`
+      +(m.leader?'<span class="crown" title="Leader">👑</span>':'')
+      +`<span class="rd ${m.ready?'on':''}">${m.ready?'Ready':'…'}</span>`
+      +(party.is_leader && !m.leader?'<button class="kick" title="Remove">✕</button>':'');
+    row.querySelector('.nm').textContent=m.name;
+    const kb=row.querySelector('.kick'); if(kb) kb.onclick=()=>partyKick(m.name);
+    wrap.appendChild(row);
+  }
+  for(const nm of (party.pending||[])){
+    const row=document.createElement('div'); row.className='party-m pending';
+    row.innerHTML=avatarHTML(nm)+'<span class="dot"></span><b class="nm"></b><span class="rd">invited…</span>';
+    row.querySelector('.nm').textContent=nm; wrap.appendChild(row);
+  }
+  const acts=document.createElement('div'); acts.className='party-acts';
+  const me=party.members.find(m=>m.name===(SAVE.session&&SAVE.session.name));
+  const ready=me?me.ready:false;
+  acts.innerHTML=`<button class="pa rdy ${ready?'on':''}">${ready?'✓ Ready':'Ready up'}</button>`
+    +(party.is_leader?`<button class="pa go">Start ▶</button>`:'');
+  acts.querySelector('.rdy').onclick=()=>partyReady(!ready);
+  const go=acts.querySelector('.go'); if(go) go.onclick=partyStart;
+  wrap.appendChild(acts); host.appendChild(wrap);
+}
+async function _pcall(cmd, extra){ const r=await sx(cmd, extra); if(r && r.ok){ partyData=r.party; renderParty(r.party, r.invite); }
+  else if(r && r.error) toast(r.error,'err'); return r; }
+async function partyInvite(name){ closeMenus(); const r=await _pcall('party_invite',{ to:name });
+  if(r && r.ok) toast('Invited '+name+' to your party','ok'); }
+async function partyJoin(pid){ const r=await _pcall('party_join',{ party:pid }); if(r && r.ok) toast('Joined the party','ok'); }
+async function partyLeave(){ await _pcall('party_leave'); }
+async function partyReady(on){ await _pcall('party_ready',{ ready:on }); }
+async function partyKick(name){ await _pcall('party_kick',{ who:name }); }
+async function partyStart(){ const r=await sx('party_start'); if(r && r.ok){ _lastGo=r.go_at; toast('Starting party match…','ok'); if(r.room_code) play(r.room_code, r.size); pollParty(); }
+  else toast((r&&r.error)||'Could not start.','err'); }
+startPartyPoll();
+
+// preview-only mock data for the new features (browser, no Tauri)
+if(!HAS_TAURI){
+  FALLBACK.career={ ok:true, name:'Aang', nation:'air', matches:48, wins:31, losses:17, winrate:65,
+    kills:112, deaths:63, kd:1.78, damage:18450, streak:4, rating:2351, recent:[
+      {uid:'demo',when:Date.now()/1000-3600,  result:'win', players:4,end_reason:'last-man'},
+      {uid:'demo',when:Date.now()/1000-7200,  result:'win', players:2,end_reason:'timer'},
+      {uid:'demo',when:Date.now()/1000-90000, result:'loss',players:4,end_reason:'last-man'},
+      {uid:'demo',when:Date.now()/1000-180000,result:'win', players:3,end_reason:'last-man'} ] };
+  FALLBACK.party_get={ ok:true, invite:null, party:{ id:'demo', leader:'Aang', is_leader:true,
+    room_code:'party-7f3a2c', size:4, status:'idle', go_at:0, pending:['Zephyra'], members:[
+      {name:'Aang',ready:true,leader:true,state:'online'},
+      {name:'KorraMain',ready:true,leader:false,state:'in-game'},
+      {name:'BoulderKing',ready:false,leader:false,state:'away'} ] } };
+  const fr=[]; for(let i=0;i<64;i++){ const a=i/9; fr.push({ t:i*0.25, players:[
+    {s:0,n:'Aang', f:4,x:Math.cos(a)*6,        z:Math.sin(a)*6,        h:Math.max(0,128-i),    hm:130,d:0,a:'move'},
+    {s:1,n:'Korra',f:3,x:Math.cos(a+2.1)*7,    z:Math.sin(a+2.1)*7,    h:Math.max(0,140-i*0.6),hm:140,d:0,a:'attack'},
+    {s:2,n:'Toph', f:1,x:Math.cos(a*1.3+4)*4.5,z:Math.sin(a*1.3+4)*4.5,h:i>44?0:95,            hm:120,d:i>44?1:0,a:'idle'} ]}); }
+  FALLBACK.match_replay={ ok:true, meta:{ uid:'demo', players:3, end_reason:'last-man',
+    winners:['Aang'], duration:16, when:Date.now()/1000-3600 },
+    frames:fr, events:[{t:11,kind:'kill',actor:'Korra',target:'Toph'},{t:6,kind:'hit',actor:'Aang',target:'Korra',value:30},
+                       {t:14,kind:'hit',actor:'Aang',target:'Korra',value:45}] };
+}
+
 // ── preview/demo harness (browser only, no Tauri) ────────────────────────────
 // Drives the social panel into a named state for screenshots / design preview:
 //   index.html?demo=friends | requests | blocked | menu | profile | add | invite
@@ -1014,5 +1228,9 @@ if(!HAS_TAURI && /[?&]demo/.test(location.search)){
     else if(state==='menu'){ const m=document.querySelector('.fr-row .more'); if(m) m.click(); }
     else if(state==='profile'){ const f=(frData.friends.find(x=>!x.favorite&&x.state!=='offline')||frData.friends[0]); if(f) openProfile(f); }
     else if(state==='invite'){ toast('BoulderKing invited you to a match','ok'); }
+    else if(state==='career') openMyCareer();
+    else if(state==='replay') openReplay('demo');
+    else if(state==='party') pollParty();
+    else if(state==='leaderboard') setView('ranks');
   });
 }
