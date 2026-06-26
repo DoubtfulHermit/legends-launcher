@@ -336,6 +336,30 @@ fn write_config(dir: &Path, s: &Settings) -> Result<(), String> {
     fs::write(&path, out).map_err(|e| format!("write Config.ini: {e}"))
 }
 
+// The game gets a NUMERIC IP, not a hostname. Two reasons:
+//  1. arena_link.dll resolves the master with an IP-only parser (inet_addr) — a hostname
+//     yields master_ip=0xffffffff and the UDP match never connects ("unable to connect to
+//     master server" / black screen).
+//  2. HTTP to a raw IP hits Caddy's plain-HTTP catch-all (the IP doesn't match the gw cert
+//     host), dodging the gw HTTPS 308-redirect the 2008 WebManager can't follow.
+// So resolve whatever host the user configured to an IPv4 and write that. The launcher's
+// OWN API calls still use the original hostname (gw.* over HTTPS). A bare IP passes through;
+// resolution failure falls back to the hostname.
+fn game_host(h: &str) -> String {
+    use std::net::{IpAddr, ToSocketAddrs};
+    let host = h.trim();
+    if host.is_empty() || host.parse::<IpAddr>().is_ok() {
+        return host.to_string();                       // already an IP (or empty)
+    }
+    if let Ok(addrs) = (host, 80u16).to_socket_addrs() {
+        let addrs: Vec<_> = addrs.collect();
+        if let Some(a) = addrs.iter().find(|a| a.is_ipv4()).or_else(|| addrs.first()) {
+            return a.ip().to_string();                 // resolved → numeric IP
+        }
+    }
+    host.to_string()                                   // resolution failed → hostname fallback
+}
+
 // Update [server] host and [room] code/queue in arena_link.ini, creating the
 // file/sections/keys if missing.
 fn write_arena(dir: &Path, s: &Settings, ticket: Option<&str>) -> Result<(), String> {
@@ -370,7 +394,7 @@ fn write_arena(dir: &Path, s: &Settings, ticket: Option<&str>) -> Result<(), Str
             else { lines.push(format!("[{section}]")); lines.push(format!("{key} = {val}")); }
         }
     }
-    set(&mut lines, "server", "host", &s.host);
+    set(&mut lines, "server", "host", &game_host(&s.host));
     set(&mut lines, "room", "code", &s.room);
     set(&mut lines, "room", "queue", &s.queue.to_string());
     // [player] ticket: the launcher's authenticated identity token (HMAC, short-lived) — arena_link
