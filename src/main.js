@@ -32,6 +32,7 @@ const DOWNLOAD_URL = 'https://legends-awakened.com';
 const SAVE_KEY = 'la.save';
 const SAVE_DEFAULTS = { element:'fire', session:null,
   board:{ mode:'overall', nation:'fire' },
+  match:{ vs:'human', bot:'ember', diff:'medium' },
   settings:{
     queue:4, room:'', server:DEFAULT_SERVER, res:'1440x1080',
     hd:false, fullscreen:true, skip_menu:false, gamescope:false, gamescope_args:'' } };
@@ -39,6 +40,7 @@ function loadSave(){
   try{ const j = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}');
     return { ...SAVE_DEFAULTS, ...j,
       board:{ ...SAVE_DEFAULTS.board, ...(j.board||{}) },
+      match:{ ...SAVE_DEFAULTS.match, ...(j.match||{}) },
       settings:{ ...SAVE_DEFAULTS.settings, ...(j.settings||{}) } }; }
   catch{ return JSON.parse(JSON.stringify(SAVE_DEFAULTS)); }
 }
@@ -191,8 +193,49 @@ function syncDrawer(){
 function openDrawer(){ syncDrawer(); drawer.classList.add('open'); scrim.classList.add('show'); }
 function closeDrawer(){ drawer.classList.remove('open'); scrim.classList.remove('show'); }
 $('navSettings').addEventListener('click', e=>{ e.preventDefault(); openDrawer(); });
-$('navHome').addEventListener('click', e=>e.preventDefault());
-$('navNews').addEventListener('click', e=>e.preventDefault());
+
+// ── view router: Home / Match / Ranks ──────────────────────────────────────────
+const NAV = { home:'navHome', match:'navMatch', ranks:'navNews' };
+function setView(v){
+  for(const id of ['home','match','ranks']) $('view-'+id).hidden = (id !== v);
+  document.querySelectorAll('.nav > a').forEach(a=>a.classList.remove('on'));
+  $(NAV[v]).classList.add('on');
+  if(v==='ranks') renderBoard();
+  if(v==='match') syncMatch();
+  if(v==='home' && typeof loadFriends==='function') loadFriends();
+}
+$('navHome').addEventListener('click', e=>{ e.preventDefault(); setView('home'); });
+$('navMatch').addEventListener('click', e=>{ e.preventDefault(); setView('match'); });
+$('navNews').addEventListener('click', e=>{ e.preventDefault(); setView('ranks'); });
+
+// ── Match setup screen ─────────────────────────────────────────────────────────
+const BOTS = ['dummy','target','grunt','ember','rumble','boss'];
+function renderBots(){
+  $('mBots').innerHTML = BOTS.map(b=>
+    `<button data-bot="${b}" class="${b===SAVE.match.bot?'on':''}">${b}</button>`).join('');
+}
+function syncMatch(){
+  document.querySelectorAll('#mSeg button').forEach(b=>b.classList.toggle('on',+b.dataset.q===SAVE.settings.queue));
+  $('mRoom').value = SAVE.settings.room || '';
+  document.querySelectorAll('#mVs button').forEach(b=>b.classList.toggle('on',b.dataset.vs===SAVE.match.vs));
+  document.querySelectorAll('#mDiff button').forEach(b=>b.classList.toggle('on',b.dataset.d===SAVE.match.diff));
+  $('mBotBox').hidden = SAVE.match.vs !== 'ai';
+  $('mRoomField').hidden = SAVE.match.vs === 'ai';
+  renderBots();
+}
+$('mSeg').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
+  SAVE.settings.queue=+b.dataset.q; persist(); syncMatch(); syncDrawer(); });
+$('mRoom').addEventListener('input', e=>{ SAVE.settings.room=e.target.value; persist(); syncDrawer(); });
+$('mVs').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
+  SAVE.match.vs=b.dataset.vs; persist(); syncMatch(); });
+$('mDiff').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
+  SAVE.match.diff=b.dataset.d; persist(); syncMatch(); });
+$('mBots').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
+  SAVE.match.bot=b.dataset.bot; persist(); syncMatch(); });
+$('mQueue').addEventListener('click', ()=>{
+  if(SAVE.match.vs==='ai'){ SAVE.settings.room = SAVE.match.bot + ':' + SAVE.match.diff; persist(); syncDrawer(); }
+  play();   // reuses the existing launch flow (reads SAVE.settings.queue/room)
+});
 $('amSettings').addEventListener('click', ()=>{ acctMenu.classList.remove('open'); openDrawer(); });
 $('drawerClose').addEventListener('click', closeDrawer);
 scrim.addEventListener('click', closeDrawer);

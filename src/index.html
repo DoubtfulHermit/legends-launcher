@@ -29,6 +29,7 @@
   <!-- nav -->
   <nav class="nav">
     <a href="#" class="on" id="navHome">Home</a>
+    <a href="#" id="navMatch">Match</a>
     <a href="#" id="navNews">Ranks</a>
     <a href="#" id="navSettings">Settings</a>
     <div class="nav-right">
@@ -46,27 +47,72 @@
 
   <!-- content -->
   <div class="main">
-    <div class="lb">
-      <div class="lb-head"><span class="lb-title">Leaderboard</span><span class="lb-cap" id="lbCap">Overall rating</span></div>
-      <div class="lb-tabs" id="lbTabs">
-        <button data-mode="overall" class="on">Overall</button>
-        <button data-mode="1v1">1v1</button>
-        <button data-mode="nation">Nation</button>
+    <!-- HOME: hero (left) + Friends (right) -->
+    <section class="view view--home on" id="view-home">
+      <div class="hero">
+        <div class="kicker">Avatar &middot; Legends of the Arena</div>
+        <h1>Master the<br><span>Four Elements</span></h1>
+        <div class="sub">The 2008 Nickelodeon arena brawler, revived. Queue up, bend, and fight to be the last legend standing.</div>
       </div>
-      <div class="lb-nations" id="lbNations" hidden>
-        <svg class="el el-fire" title="Fire"><use href="#el-fire"/></svg>
-        <svg class="el el-water" title="Water"><use href="#el-water"/></svg>
-        <svg class="el el-earth" title="Earth"><use href="#el-earth"/></svg>
-        <svg class="el el-air" title="Air"><use href="#el-air"/></svg>
+      <div class="fr" id="friends">
+        <div class="fr-head"><span class="fr-title">Friends</span><span class="fr-count" id="frCount"></span></div>
+        <div class="fr-add">
+          <input id="frAddName" placeholder="add a friend by name" spellcheck="false" autocomplete="off">
+          <button id="frAddBtn">Add</button>
+        </div>
+        <div class="fr-reqs" id="frReqs" hidden></div>
+        <div class="fr-list" id="frList"></div>
+        <div class="fr-empty" id="frEmpty" hidden>Sign in to add friends and see who&rsquo;s online.</div>
       </div>
-      <div class="lb-list" id="lbList"></div>
-    </div>
+    </section>
 
-    <div class="hero">
-      <div class="kicker">Avatar &middot; Legends of the Arena</div>
-      <h1>Master the<br><span>Four Elements</span></h1>
-      <div class="sub">The 2008 Nickelodeon arena brawler, revived. Queue up, bend, and fight to be the last legend standing.</div>
-    </div>
+    <!-- MATCH: set up a match -->
+    <section class="view view--match" id="view-match" hidden>
+      <div class="match">
+        <div class="m-title">Set up your match</div>
+        <div class="m-sub">Pick a size, optionally a room code or an AI opponent, then queue up.</div>
+        <div class="m-card">
+          <div class="field"><label>Match size</label>
+            <div class="seg seg--lbl" id="mSeg">
+              <button data-q="2"><b>2</b><small>Duel</small></button>
+              <button data-q="3"><b>3</b><small>Trio</small></button>
+              <button data-q="4"><b>4</b><small>Arena</small></button>
+            </div>
+          </div>
+          <div class="field"><label>Opponent</label>
+            <div class="seg" id="mVs"><button data-vs="human" class="on">Players</button><button data-vs="ai">vs AI</button></div>
+          </div>
+          <div class="field" id="mRoomField"><label>Room code <span style="color:var(--smoke);font-weight:700">&mdash; optional</span></label>
+            <input id="mRoom" placeholder="leave blank for open matchmaking"></div>
+          <div id="mBotBox" hidden>
+            <div class="field"><label>AI opponent</label><div class="m-bots" id="mBots"></div></div>
+            <div class="field"><label>Difficulty</label>
+              <div class="seg" id="mDiff"><button data-d="easy">Easy</button><button data-d="medium" class="on">Medium</button><button data-d="hard">Hard</button></div>
+            </div>
+          </div>
+        </div>
+        <button class="btn m-queue" id="mQueue"><span class="arrow">&#9658;</span> QUEUE</button>
+      </div>
+    </section>
+
+    <!-- RANKS: leaderboard -->
+    <section class="view view--ranks" id="view-ranks" hidden>
+      <div class="lb lb--full">
+        <div class="lb-head"><span class="lb-title">Leaderboard</span><span class="lb-cap" id="lbCap">Overall rating</span></div>
+        <div class="lb-tabs" id="lbTabs">
+          <button data-mode="overall" class="on">Overall</button>
+          <button data-mode="1v1">1v1</button>
+          <button data-mode="nation">Nation</button>
+        </div>
+        <div class="lb-nations" id="lbNations" hidden>
+          <svg class="el el-fire" title="Fire"><use href="#el-fire"/></svg>
+          <svg class="el el-water" title="Water"><use href="#el-water"/></svg>
+          <svg class="el el-earth" title="Earth"><use href="#el-earth"/></svg>
+          <svg class="el el-air" title="Air"><use href="#el-air"/></svg>
+        </div>
+        <div class="lb-list" id="lbList"></div>
+      </div>
+    </section>
   </div>
 
   <!-- bottom action bar -->
