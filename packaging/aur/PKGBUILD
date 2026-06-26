@@ -1,0 +1,24 @@
+# Maintainer: DoubtfulHermit <legends-awakened>
+# A -bin package: it repackages the official .deb release asset for Arch. The binary
+# inside links the SYSTEM webkit2gtk-4.1, so it always matches the user's GPU stack
+# (this is the whole reason it renders where the bundled AppImage grey-screens).
+pkgname=legends-awakened-launcher-bin
+pkgver=0.1.19
+pkgrel=1
+pkgdesc="Launcher for Legends Awakened (Avatar: The Last Airbender multiplayer)"
+arch=('x86_64')
+url="https://github.com/DoubtfulHermit/Avatar"
+license=('custom')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator')
+provides=('legends-awakened-launcher')
+conflicts=('legends-awakened-launcher')
+options=('!strip' '!debug')
+source=("${pkgname}-${pkgver}.deb::${url}/releases/download/launcher-v${pkgver}/Legends.Awakened.Launcher_${pkgver}_amd64.deb")
+sha256sums=('SKIP')
+
+package() {
+  # A .deb is an `ar` archive of {debian-binary, control.tar.*, data.tar.*};
+  # data.tar.* holds the filesystem tree (/usr/bin, /usr/share/...). bsdtar reads both.
+  bsdtar -xf "${pkgname}-${pkgver}.deb" -C "${srcdir}"
+  bsdtar -xpf "${srcdir}"/data.tar.* -C "${pkgdir}"
+}
