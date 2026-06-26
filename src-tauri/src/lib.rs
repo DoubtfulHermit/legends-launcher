@@ -777,6 +777,11 @@ struct SelfUpdateOut { updated: bool, version: Option<String>, error: Option<Str
 
 #[tauri::command]
 async fn self_update(app: tauri::AppHandle) -> SelfUpdateOut {
+    // Linux updates via the package manager — never self-install (would call dpkg). See check_self_update.
+    #[cfg(target_os = "linux")]
+    { let _ = &app; return SelfUpdateOut { error: Some("On Linux, update with your package manager (pacman / apt / AUR).".into()), ..Default::default() }; }
+    #[cfg(not(target_os = "linux"))]
+    {
     use tauri_plugin_updater::UpdaterExt;
     let updater = match app.updater() {
         Ok(u) => u,
@@ -792,6 +797,7 @@ async fn self_update(app: tauri::AppHandle) -> SelfUpdateOut {
         Ok(()) => SelfUpdateOut { updated: true, version: Some(version), error: None },
         Err(e) => SelfUpdateOut { error: Some(e.to_string()), ..Default::default() },
     }
+    }
 }
 
 #[derive(Serialize, Default)]
@@ -801,13 +807,21 @@ struct SelfUpdateCheck { available: bool, version: Option<String> }
 // the UI prompts, then calls self_update.) Silent no-op if the endpoint is unreachable.
 #[tauri::command]
 async fn check_self_update(app: tauri::AppHandle) -> SelfUpdateCheck {
-    use tauri_plugin_updater::UpdaterExt;
-    if let Ok(updater) = app.updater() {
-        if let Ok(Some(u)) = updater.check().await {
-            return SelfUpdateCheck { available: true, version: Some(u.version) };
+    // Linux installs are owned by the package manager (pacman / apt / AUR). The in-app
+    // updater would download the .deb and shell out to `dpkg` (absent on Arch) to replace
+    // a package-managed binary — so never offer a self-update on Linux. Windows (NSIS) only.
+    #[cfg(target_os = "linux")]
+    { let _ = &app; return SelfUpdateCheck::default(); }
+    #[cfg(not(target_os = "linux"))]
+    {
+        use tauri_plugin_updater::UpdaterExt;
+        if let Ok(updater) = app.updater() {
+            if let Ok(Some(u)) = updater.check().await {
+                return SelfUpdateCheck { available: true, version: Some(u.version) };
+            }
         }
+        SelfUpdateCheck::default()
     }
-    SelfUpdateCheck::default()
 }
 
 // On a path like `…/<prefix>/drive_c/…`, return `<prefix>` so we can set WINEPREFIX

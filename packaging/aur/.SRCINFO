@@ -1,6 +1,6 @@
 pkgbase = legends-awakened-launcher-bin
 	pkgdesc = Launcher for Legends Awakened (Avatar: The Last Airbender multiplayer)
-	pkgver = 0.1.22
+	pkgver = 0.1.23
 	pkgrel = 1
 	url = https://github.com/DoubtfulHermit/legends-launcher
 	arch = x86_64
@@ -12,7 +12,7 @@ pkgbase = legends-awakened-launcher-bin
 	conflicts = legends-awakened-launcher
 	options = !strip
 	options = !debug
-	source = legends-awakened-launcher-bin-0.1.22.deb::https://github.com/DoubtfulHermit/legends-launcher/releases/download/v0.1.22/Legends.Awakened.Launcher_0.1.22_amd64.deb
+	source = legends-awakened-launcher-bin-0.1.23.deb::https://github.com/DoubtfulHermit/legends-launcher/releases/download/v0.1.23/Legends.Awakened.Launcher_0.1.23_amd64.deb
 	sha256sums = SKIP
 
 pkgname = legends-awakened-launcher-bin
