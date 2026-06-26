@@ -36,7 +36,7 @@ const DOWNLOAD_URL = 'https://legends-awakened.com';
 const SAVE_KEY = 'la.save';
 const SAVE_DEFAULTS = { element:'fire', session:null,
   board:{ mode:'overall', nation:'fire' },
-  match:{ vs:'human', bot:'ember', diff:'medium' },
+  match:{ bot:'ember', diff:'medium', tsize:2 },
   settings:{
     queue:4, room:'', server:DEFAULT_SERVER, res:'1440x1080',
     hd:false, fullscreen:true, skip_menu:false, gamescope:false, gamescope_args:'' } };
@@ -192,12 +192,34 @@ function _notifyFriendChanges(incoming, friends){
   }
   _seenIncoming = new Set(inc); _seenFriends = new Set(fr); _frPrimed = true;
 }
+// Distinguish "not signed in" from "signed in but social server unreachable".
+function frShowEmpty(){
+  const signedIn = !!(SAVE.session && SAVE.session.name);
+  $('frList').innerHTML=''; $('frReqs').hidden=true; $('frCount').textContent='';
+  $('frAdd').hidden=true; $('frAddToggle').hidden=true;
+  const el=$('frEmpty');
+  if(signedIn){
+    el.innerHTML='Couldn’t reach the social server. <a href="#" id="frRetry">Retry</a>';
+    const rt=$('frRetry'); if(rt) rt.onclick=e=>{ e.preventDefault(); retrySocial(); };
+  } else {
+    el.textContent='Sign in to add friends and see who’s online.';
+  }
+  el.hidden=false;
+}
+async function retrySocial(){
+  if(!(SAVE.session && SAVE.session.name)) return;
+  if(!sessionPass){ toast('Sign out and back in to reconnect.','err'); return; }
+  try{ const s=await invoke('session_login',{ host:SAVE.settings.server, username:SAVE.session.name, password:sessionPass });
+    if(s && s.ok && s.token){ SAVE.session.token=s.token; persist(); startPresence(); loadFriends(); toast('Reconnected.','ok'); return; }
+  }catch{}
+  toast('Still can’t reach the social server.','err');
+}
 async function loadFriends(){
-  if(!_tok()){ $('frList').innerHTML=''; $('frReqs').hidden=true; $('frCount').textContent=''; $('frEmpty').hidden=false; _frResetNotify(); return; }
-  $('frEmpty').hidden = true;
+  if(!_tok()){ frShowEmpty(); _frResetNotify(); return; }
+  $('frEmpty').hidden = true; $('frAddToggle').hidden = false;
   let r; try{ r = await invoke('friends_list',{ host:SAVE.settings.server, token:_tok() }); }catch{ return; }
   if(!r || !r.ok){
-    if(r && /signed in/.test(r.error||'')){ SAVE.session.token=null; persist(); $('frEmpty').hidden=false; _frResetNotify(); }
+    if(r && /signed in/.test(r.error||'')){ SAVE.session.token=null; persist(); frShowEmpty(); _frResetNotify(); }
     return;
   }
   _notifyFriendChanges(r.incoming||[], r.friends||[]);
@@ -238,7 +260,7 @@ function renderFriends(friends, incoming, outgoing){
 async function addFriend(){
   const name=$('frAddName').value.trim(); if(!name || !_tok()) return;
   const r=await invoke('friend_request',{ host:SAVE.settings.server, token:_tok(), to:name }).catch(()=>null);
-  if(r && r.ok){ $('frAddName').value=''; toast('Friend request sent to '+name,'ok'); loadFriends(); }
+  if(r && r.ok){ $('frAddName').value=''; $('frAdd').hidden=true; toast('Friend request sent to '+name,'ok'); loadFriends(); }
   else toast((r && r.error) || 'Could not send request.','err');
 }
 async function respondFriend(from, accept){
@@ -249,8 +271,9 @@ async function removeFriend(who){
   const r=await invoke('friend_remove',{ host:SAVE.settings.server, token:_tok(), who }).catch(()=>null);
   if(r && r.ok) loadFriends();
 }
+$('frAddToggle').addEventListener('click', ()=>{ const a=$('frAdd'); a.hidden=!a.hidden; if(!a.hidden) $('frAddName').focus(); });
 $('frAddBtn').addEventListener('click', addFriend);
-$('frAddName').addEventListener('keydown', e=>{ if(e.key==='Enter') addFriend(); });
+$('frAddName').addEventListener('keydown', e=>{ if(e.key==='Enter') addFriend(); else if(e.key==='Escape') $('frAdd').hidden=true; });
 setInterval(()=>{ if(!document.hidden && !$('view-home').hidden) loadFriends(); }, 20000);
 $('liPass').addEventListener('keydown', e=>{ if(e.key==='Enter') signIn(); });
 $('liUser').addEventListener('keydown', e=>{ if(e.key==='Enter') $('liPass').focus(); });
@@ -270,8 +293,6 @@ function buildResolutions(){
 }
 function syncDrawer(){
   const st=SAVE.settings;
-  document.querySelectorAll('#seg button').forEach(b=>b.classList.toggle('on',+b.dataset.q===st.queue));
-  $('stRoom').value=st.room||'';
   $('stServer').value=st.server||'';
   $('stRes').value=st.res;
   $('stFs').classList.toggle('on', !!st.fullscreen);
@@ -287,54 +308,83 @@ function openDrawer(){ syncDrawer(); drawer.classList.add('open'); scrim.classLi
 function closeDrawer(){ drawer.classList.remove('open'); scrim.classList.remove('show'); }
 $('navSettings').addEventListener('click', e=>{ e.preventDefault(); openDrawer(); });
 
-// ── view router: Home / Match / Ranks ──────────────────────────────────────────
-const NAV = { home:'navHome', match:'navMatch', ranks:'navNews' };
+// ── view router: Home / Match / Training / Ranks ────────────────────────────────
+const NAV = { home:'navHome', match:'navMatch', training:'navTraining', ranks:'navNews' };
+let curView = 'home';
 function setView(v){
-  for(const id of ['home','match','ranks']) $('view-'+id).hidden = (id !== v);
+  curView = v;
+  for(const id of ['home','match','training','ranks']) $('view-'+id).hidden = (id !== v);
   document.querySelectorAll('.nav > a').forEach(a=>a.classList.remove('on'));
   $(NAV[v]).classList.add('on');
   if(v==='ranks') renderBoard();
   if(v==='match') syncMatch();
+  if(v==='training') syncTraining();
   if(v==='home' && typeof loadFriends==='function') loadFriends();
+  updateCTA();
 }
 $('navHome').addEventListener('click', e=>{ e.preventDefault(); setView('home'); });
 $('navMatch').addEventListener('click', e=>{ e.preventDefault(); setView('match'); });
+$('navTraining').addEventListener('click', e=>{ e.preventDefault(); setView('training'); });
 $('navNews').addEventListener('click', e=>{ e.preventDefault(); setView('ranks'); });
 
-// ── Match setup screen ─────────────────────────────────────────────────────────
-const BOTS = ['dummy','target','grunt','ember','rumble','boss'];
-function renderBots(){
-  $('mBots').innerHTML = BOTS.map(b=>
-    `<button data-bot="${b}" class="${b===SAVE.match.bot?'on':''}">${b}</button>`).join('');
+// The bottom-right button is one contextual CTA:
+//   Home / Ranks  → "MATCH"  (jump to the Match tab)
+//   Match         → "PLAY"   (queue a player match)
+//   Training      → "PLAY"   (start a match vs AI)
+function ctaMode(){
+  if(curView==='match'||curView==='training') return 'play';
+  if(curView==='home') return 'goto';
+  return 'hidden';                           // ranks: viewing only — no action button
 }
+function updateCTA(){
+  const m=ctaMode(), pw=$('play');
+  if(m==='hidden'){ pw.style.display='none'; return; }
+  if(pw.style.display==='none') pw.style.display='flex';
+  if(pw.disabled) return;                    // mid-launch: leave the label alone
+  setPlayLabel(m==='play' ? 'PLAY' : 'MATCH');
+}
+function onCTA(){
+  const m=ctaMode();
+  if(m==='hidden') return;
+  if(m==='goto'){ setView('match'); return; }
+  if(curView==='training'){
+    const count = Math.max(1, (SAVE.match.tsize||2) - 1);
+    const room = SAVE.match.bot + ':' + SAVE.match.diff + (count>1 ? ':'+count : '');
+    play(room, SAVE.match.tsize||2);         // transient room + arena size; never persisted
+  } else {
+    play();                                  // human match: uses the typed room code
+  }
+}
+
+// ── Match setup (vs players) ────────────────────────────────────────────────────
 function syncMatch(){
   document.querySelectorAll('#mSeg button').forEach(b=>b.classList.toggle('on',+b.dataset.q===SAVE.settings.queue));
   $('mRoom').value = SAVE.settings.room || '';
-  document.querySelectorAll('#mVs button').forEach(b=>b.classList.toggle('on',b.dataset.vs===SAVE.match.vs));
-  document.querySelectorAll('#mDiff button').forEach(b=>b.classList.toggle('on',b.dataset.d===SAVE.match.diff));
-  $('mBotBox').hidden = SAVE.match.vs !== 'ai';
-  $('mRoomField').hidden = SAVE.match.vs === 'ai';
-  renderBots();
 }
 $('mSeg').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
-  SAVE.settings.queue=+b.dataset.q; persist(); syncMatch(); syncDrawer(); });
-$('mRoom').addEventListener('input', e=>{ SAVE.settings.room=e.target.value; persist(); syncDrawer(); });
-$('mVs').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
-  SAVE.match.vs=b.dataset.vs; persist(); syncMatch(); });
-$('mDiff').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
-  SAVE.match.diff=b.dataset.d; persist(); syncMatch(); });
-$('mBots').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
-  SAVE.match.bot=b.dataset.bot; persist(); syncMatch(); });
-$('mQueue').addEventListener('click', ()=>{
-  if(SAVE.match.vs==='ai'){ SAVE.settings.room = SAVE.match.bot + ':' + SAVE.match.diff; persist(); syncDrawer(); }
-  play();   // reuses the existing launch flow (reads SAVE.settings.queue/room)
-});
+  SAVE.settings.queue=+b.dataset.q; persist(); syncMatch(); });
+$('mRoom').addEventListener('input', e=>{ SAVE.settings.room=e.target.value; persist(); });
+
+// ── Training setup (vs AI) ──────────────────────────────────────────────────────
+const BOTS = ['dummy','target','grunt','ember','rumble','boss'];
+function renderTBots(){
+  $('tBots').innerHTML = BOTS.map(b=>
+    `<button data-bot="${b}" class="${b===SAVE.match.bot?'on':''}">${b}</button>`).join('');
+}
+function syncTraining(){
+  document.querySelectorAll('#tSeg button').forEach(b=>b.classList.toggle('on',+b.dataset.q===(SAVE.match.tsize||2)));
+  document.querySelectorAll('#tDiff button').forEach(b=>b.classList.toggle('on',b.dataset.d===SAVE.match.diff));
+  renderTBots();
+}
+$('tSeg').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
+  SAVE.match.tsize=+b.dataset.q; persist(); syncTraining(); });
+$('tDiff').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
+  SAVE.match.diff=b.dataset.d; persist(); syncTraining(); });
+$('tBots').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
+  SAVE.match.bot=b.dataset.bot; persist(); syncTraining(); });
 $('amSettings').addEventListener('click', ()=>{ acctMenu.classList.remove('open'); openDrawer(); });
 $('drawerClose').addEventListener('click', closeDrawer);
 scrim.addEventListener('click', closeDrawer);
-$('seg').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
-  SAVE.settings.queue=+b.dataset.q; persist(); syncDrawer(); });
-$('stRoom').addEventListener('input', e=>{ SAVE.settings.room=e.target.value; persist(); });
 $('stServer').addEventListener('input', e=>{ SAVE.settings.server=e.target.value; persist(); });
 $('stRes').addEventListener('change', e=>{ SAVE.settings.res=e.target.value; persist(); });
 $('stFs').addEventListener('click', ()=>{ SAVE.settings.fullscreen=!SAVE.settings.fullscreen; persist(); syncDrawer(); });
@@ -381,12 +431,14 @@ function gather(){
 // PLAY morphs into a status pill (#prog) — reused for the experimental Skip-menus orchestration.
 function showProg(text, pct){ $('play').style.display='none'; $('prog').style.display='block';
   $('progText').textContent=text; $('progFill').style.width=(pct||0)+'%'; $('progPct').textContent = pct!=null?pct+'%':''; }
-function resetPlay(){ $('prog').style.display='none'; $('play').style.display='flex'; $('play').disabled=false; setPlayLabel('PLAY'); }
+function resetPlay(){ $('prog').style.display='none'; $('play').style.display='flex'; $('play').disabled=false; updateCTA(); }
 
 
-async function play(){
+async function play(roomOverride, queueOverride){
   if(!found){ return locate(); }   // PLAY doubles as "locate game" when not found
   const settings=gather();
+  if(roomOverride!=null) settings.room=roomOverride;       // training: transient bot room, never persisted
+  if(queueOverride!=null) settings.queue=queueOverride;
   // Seamless identity: mint a one-time ticket from the signed-in session so the game loads the
   // REAL character. Password is memory-only; a resumed session without it falls back to default.
   let username=null, ticket=null;
@@ -410,7 +462,7 @@ async function locate(){
   try{ const p=await invoke('locate'); if(p) await refresh(); else toast('That folder has no Config.ini.','err'); }
   catch(e){ toast(String(e),'err'); }
 }
-$('play').addEventListener('click', play);
+$('play').addEventListener('click', onCTA);
 
 // ── updates (read-only check; explicit, modal-gated patch) ───────────────────
 let updateMode=null;
@@ -554,21 +606,32 @@ const DEMO_BOARD = [
 ];
 let boardData = DEMO_BOARD;
 const cap = s => s.charAt(0).toUpperCase()+s.slice(1);
+const NATION_NAMES = { fire:'Fire Nation', water:'Water Tribe', earth:'Earth Kingdom', air:'Air Nomads' };
 function boardRows(){
   const { mode, nation } = SAVE.board;
+  // Dominance: rank the four nations by their players' COMBINED score.
+  if(mode==='dominance'){
+    const totals = {};
+    for(const p of boardData) totals[p.nation] = (totals[p.nation]||0) + p.rating;
+    return Object.keys(NATION_NAMES)
+      .map(n=>({ name:NATION_NAMES[n], nation:n, value:totals[n]||0 }))
+      .sort((a,b)=>b.value-a.value)
+      .map((r,i)=>({ ...r, rank:i+1 }));
+  }
   let list = boardData.slice();
   if(mode==='nation') list = list.filter(p=>p.nation===nation);
-  const key = mode==='1v1' ? 'solo' : 'rating';
-  list.sort((a,b)=>b[key]-a[key]);
-  return list.slice(0,10).map((p,i)=>({ ...p, rank:i+1, value:p[key] }));
+  list.sort((a,b)=>b.rating-a.rating);
+  return list.slice(0,10).map((p,i)=>({ ...p, rank:i+1, value:p.rating }));
 }
 function renderBoard(){
+  if(!['overall','nation','dominance'].includes(SAVE.board.mode)) SAVE.board.mode='overall';   // drop legacy '1v1'
   const { mode, nation } = SAVE.board;
   document.querySelectorAll('#lbTabs button').forEach(b=>b.classList.toggle('on', b.dataset.mode===mode));
   $('lbNations').hidden = mode!=='nation';
   document.querySelectorAll('#lbNations .el').forEach(s=>
     s.classList.toggle('on', /el-(\w+)/.exec(s.getAttribute('class'))[1]===nation));
-  $('lbCap').textContent = mode==='1v1' ? '1v1 rating' : mode==='nation' ? cap(nation)+' · rating' : 'Overall rating';
+  $('lbCap').textContent = mode==='dominance' ? 'Combined nation score'
+    : mode==='nation' ? cap(nation)+' · rating' : 'Overall rating';
   const host = $('lbList'); host.innerHTML='';
   const rows = boardRows();
   if(!rows.length){ host.innerHTML='<div class="lb-empty">No ranked players yet.</div>'; return; }
@@ -607,5 +670,6 @@ renderBoard();
 if(SAVE.session){ showChip(SAVE.session.name); loginEl.classList.add('hide'); startPresence(); loadFriends(); }
 else { showChip(null); setTimeout(()=>$('liUser').focus(), 60); loadFriends(); }
 startParticles();
+updateCTA();   // Home → the bottom button reads "MATCH"
 refresh().then(()=>{ pollStatus(); checkForUpdates(false); checkLauncherUpdate(); loadBoard(); });
 setInterval(pollStatus, 12000);

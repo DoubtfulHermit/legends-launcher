@@ -30,7 +30,8 @@
   <nav class="nav">
     <a href="#" class="on" id="navHome">Home</a>
     <a href="#" id="navMatch">Match</a>
-    <a href="#" id="navNews">Ranks</a>
+    <a href="#" id="navTraining">Training</a>
+    <a href="#" id="navNews">Leaderboard</a>
     <a href="#" id="navSettings">Settings</a>
     <div class="nav-right">
       <div class="elements" title="Choose your element">
@@ -55,8 +56,11 @@
         <div class="sub">The 2008 Nickelodeon arena brawler, revived. Queue up, bend, and fight to be the last legend standing.</div>
       </div>
       <div class="fr" id="friends">
-        <div class="fr-head"><span class="fr-title">Friends</span><span class="fr-count" id="frCount"></span></div>
-        <div class="fr-add">
+        <div class="fr-head"><span class="fr-title">Friends</span>
+          <span class="fr-count" id="frCount"></span>
+          <button class="fr-addtoggle" id="frAddToggle" title="Add a friend" hidden>+ Add</button>
+        </div>
+        <div class="fr-add" id="frAdd" hidden>
           <input id="frAddName" placeholder="add a friend by name" spellcheck="false" autocomplete="off">
           <button id="frAddBtn">Add</button>
         </div>
@@ -66,11 +70,11 @@
       </div>
     </section>
 
-    <!-- MATCH: set up a match -->
+    <!-- MATCH: set up a match against players -->
     <section class="view view--match" id="view-match" hidden>
       <div class="match">
         <div class="m-title">Set up your match</div>
-        <div class="m-sub">Pick a size, optionally a room code or an AI opponent, then queue up.</div>
+        <div class="m-sub">Pick a size and, optionally, a room code &mdash; then hit Play.</div>
         <div class="m-card">
           <div class="field"><label>Match size</label>
             <div class="seg seg--lbl" id="mSeg">
@@ -79,19 +83,32 @@
               <button data-q="4"><b>4</b><small>Arena</small></button>
             </div>
           </div>
-          <div class="field"><label>Opponent</label>
-            <div class="seg" id="mVs"><button data-vs="human" class="on">Players</button><button data-vs="ai">vs AI</button></div>
-          </div>
           <div class="field" id="mRoomField"><label>Room code <span style="color:var(--smoke);font-weight:700">&mdash; optional</span></label>
             <input id="mRoom" placeholder="leave blank for open matchmaking"></div>
-          <div id="mBotBox" hidden>
-            <div class="field"><label>AI opponent</label><div class="m-bots" id="mBots"></div></div>
-            <div class="field"><label>Difficulty</label>
-              <div class="seg" id="mDiff"><button data-d="easy">Easy</button><button data-d="medium" class="on">Medium</button><button data-d="hard">Hard</button></div>
+        </div>
+        <div class="m-hint">Hit <b>Play</b> below to queue.</div>
+      </div>
+    </section>
+
+    <!-- TRAINING: practice vs AI -->
+    <section class="view view--training" id="view-training" hidden>
+      <div class="match">
+        <div class="m-title">Training</div>
+        <div class="m-sub">Practice against AI opponents &mdash; no rank, no stakes.</div>
+        <div class="m-card">
+          <div class="field"><label>Arena size</label>
+            <div class="seg seg--lbl" id="tSeg">
+              <button data-q="2"><b>1v1</b><small>One bot</small></button>
+              <button data-q="3"><b>1v2</b><small>Two bots</small></button>
+              <button data-q="4"><b>1v3</b><small>Three bots</small></button>
             </div>
           </div>
+          <div class="field"><label>AI opponent</label><div class="m-bots" id="tBots"></div></div>
+          <div class="field"><label>Difficulty</label>
+            <div class="seg" id="tDiff"><button data-d="easy">Easy</button><button data-d="medium" class="on">Medium</button><button data-d="hard">Hard</button></div>
+          </div>
         </div>
-        <button class="btn m-queue" id="mQueue"><span class="arrow">&#9658;</span> QUEUE</button>
+        <div class="m-hint">Hit <b>Play</b> below to start training.</div>
       </div>
     </section>
 
@@ -101,8 +118,8 @@
         <div class="lb-head"><span class="lb-title">Leaderboard</span><span class="lb-cap" id="lbCap">Overall rating</span></div>
         <div class="lb-tabs" id="lbTabs">
           <button data-mode="overall" class="on">Overall</button>
-          <button data-mode="1v1">1v1</button>
           <button data-mode="nation">Nation</button>
+          <button data-mode="dominance">Dominance</button>
         </div>
         <div class="lb-nations" id="lbNations" hidden>
           <svg class="el el-fire" title="Fire"><use href="#el-fire"/></svg>
@@ -148,16 +165,7 @@
   <aside class="drawer" id="drawer">
     <button class="x" id="drawerClose">&#10005;</button>
     <h3>Settings</h3>
-    <div class="ds">Saved automatically on this machine.</div>
-
-    <div class="sec">Match</div>
-    <div class="field"><label>Match size</label>
-      <div class="seg" id="seg">
-        <button data-q="2">2</button><button data-q="3">3</button><button data-q="4">4</button>
-      </div>
-    </div>
-    <div class="field"><label>Room code <span style="color:var(--smoke);font-weight:700">&mdash; optional</span></label>
-      <input id="stRoom" placeholder="leave blank for quick match"></div>
+    <div class="ds">Saved automatically on this machine. Match &amp; training options live on their own tabs.</div>
 
     <div class="sec">Experimental</div>
     <div class="row"><div class="rl"><b>Skip menus &rarr; arena <span class="xbadge">Experimental</span></b>

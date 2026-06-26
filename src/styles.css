@@ -80,10 +80,10 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
 .main{position:relative;z-index:10;height:calc(100% - 40px - 42px - 96px);padding:18px 24px 0}
 /* ── view router: Home (hero+friends) / Match / Ranks ── */
 .view{height:100%}
-.view--home{display:grid;grid-template-columns:1fr 340px;gap:0}
-.view--match{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
-.view--ranks{display:grid;place-items:start center}
-.fr{grid-column:2;align-self:start}
+.view--home{display:grid;grid-template-columns:1fr 360px;gap:0}
+.view--match,.view--training{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.view--ranks{display:flex;align-items:flex-start;justify-content:center;padding-top:4px}
+.fr{grid-column:2;align-self:stretch;display:flex;flex-direction:column;min-height:0;margin-bottom:26px}
 
 /* ── leaderboard — the RIGHT column (no backdrop-filter: it sits over the
    animated canvas, so a per-frame blur would cost real GPU time) ── */
@@ -141,8 +141,8 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
 
 /* ── bottom action bar ── */
 .bar{position:absolute;left:0;right:0;bottom:0;z-index:10;height:96px;display:flex;align-items:center;
-  gap:18px;padding:0 24px;
-  background:linear-gradient(0deg, rgba(6,4,8,.96), rgba(6,4,8,.55) 70%, transparent)}
+  gap:18px;padding:0 24px;border-top:1px solid var(--bd);
+  background:linear-gradient(0deg, rgba(6,4,8,.985), rgba(6,4,8,.92))}
 .status{display:flex;flex-direction:column;gap:7px}
 .online{display:flex;align-items:center;gap:9px;font-weight:800;letter-spacing:.04em}
 .online b{font-size:20px;color:var(--bone)}
@@ -323,9 +323,12 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
 /* ── Friends panel (Home right) ── */
 .fr{background:rgba(14,10,18,.72);border:1px solid var(--bd);border-radius:14px;padding:14px;
   display:flex;flex-direction:column;gap:10px;box-shadow:0 18px 50px rgba(0,0,0,.4)}
-.fr-head{display:flex;align-items:baseline;justify-content:space-between}
+.fr-head{display:flex;align-items:center;gap:9px}
 .fr-title{font-family:Cinzel,serif;font-weight:700;font-size:13px;letter-spacing:.2em;color:var(--gold);text-transform:uppercase}
-.fr-count{font-size:10px;color:var(--good);letter-spacing:.08em}
+.fr-count{font-size:10px;color:var(--good);letter-spacing:.08em;margin-left:auto}
+.fr-addtoggle{height:24px;padding:0 10px;border:1px solid var(--bd);border-radius:999px;background:rgba(255,255,255,.04);
+  color:var(--bone);font:inherit;font-weight:800;font-size:11px;letter-spacing:.04em;cursor:pointer;white-space:nowrap}
+.fr-addtoggle:hover{border-color:rgba(var(--ember-rgb),.6);color:#fff}
 .fr-add{display:flex;gap:7px}
 .fr-add input{flex:1;height:34px;padding:0 11px;border-radius:9px;background:rgba(8,6,12,.7);border:1px solid var(--bd);
   color:var(--bone);font:inherit;font-size:12.5px;outline:none}
@@ -339,7 +342,7 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
 .fr-req .tag{font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--smoke)}
 .fr-req button{width:24px;height:24px;border:0;border-radius:7px;cursor:pointer;font-size:13px;line-height:1;color:#fff}
 .fr-req .yes{background:rgba(82,224,138,.85)} .fr-req .no{background:rgba(248,81,73,.7)}
-.fr-list{display:flex;flex-direction:column;gap:3px;max-height:300px;overflow-y:auto}
+.fr-list{display:flex;flex-direction:column;gap:3px;flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto}
 .fr-list::-webkit-scrollbar{width:6px}.fr-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px}
 .fr-row{display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:9px;background:rgba(255,255,255,.015);
   border:1px solid transparent;transition:background .12s}
@@ -355,5 +358,20 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
 .fr-empty{padding:16px 8px;text-align:center;color:var(--smoke);font-size:12px}
 
 /* leaderboard, full-width on the Ranks tab */
-.lb--full{width:460px;max-width:100%;margin-top:2px}
-.lb--full .lb-list{max-height:calc(100vh - 330px)}
+/* Ranks tab: a real centred page, not a tiny floating box. Override the .lb base
+   grid-column:2 (a leftover from when it lived in the Home grid) so it centres. */
+.lb--full{grid-column:auto;width:min(840px,94%);max-width:100%;margin:0 auto;gap:14px;padding:20px 22px 16px;
+  max-height:calc(100% - 10px);display:flex;flex-direction:column}
+.lb--full .lb-title{font-size:15px}
+.lb--full .lb-cap{font-size:10.5px}
+.lb--full .lb-tabs button{height:34px;font-size:13px}
+.lb--full .lb-nations .el{width:28px;height:28px}
+.lb--full .lb-list{max-height:none;flex:1 1 auto;min-height:0;gap:5px}
+.lb--full .lb-row{padding:11px 16px}
+.lb--full .lb-rank{width:24px;font-size:14px}
+.lb--full .lb-el{width:24px;height:24px}
+.lb--full .lb-name{font-size:15px}
+.lb--full .lb-val{font-size:15px}
+/* Match/Training: small hint under the card pointing at the contextual Play button */
+.m-hint{font-size:12px;color:var(--mut)}
+.m-hint b{color:var(--gold)}
