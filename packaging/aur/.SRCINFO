@@ -1,8 +1,8 @@
 pkgbase = legends-awakened-launcher-bin
 	pkgdesc = Launcher for Legends Awakened (Avatar: The Last Airbender multiplayer)
-	pkgver = 0.1.19
+	pkgver = 0.1.20
 	pkgrel = 1
-	url = https://github.com/DoubtfulHermit/Avatar
+	url = https://github.com/DoubtfulHermit/legends-launcher
 	arch = x86_64
 	license = custom
 	depends = webkit2gtk-4.1
@@ -10,7 +10,7 @@ pkgbase = legends-awakened-launcher-bin
 	depends = libayatana-appindicator
 	provides = legends-awakened-launcher
 	conflicts = legends-awakened-launcher
-	source = legends-awakened-launcher-bin-0.1.19.deb::https://github.com/DoubtfulHermit/Avatar/releases/download/launcher-v0.1.19/Legends.Awakened.Launcher_0.1.19_amd64.deb
+	source = legends-awakened-launcher-bin-0.1.20.deb::https://github.com/DoubtfulHermit/legends-launcher/releases/download/v0.1.19/Legends.Awakened.Launcher_0.1.19_amd64.deb
 	sha256sums = SKIP
 
 pkgname = legends-awakened-launcher-bin

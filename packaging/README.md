@@ -28,7 +28,7 @@ registered at https://aur.archlinux.org/account):
 ```sh
 # one time: clone the (empty) AUR repo
 git clone ssh://aur@aur.archlinux.org/legends-awakened-launcher-bin.git aur-pkg
-cp launcher/packaging/aur/PKGBUILD launcher/packaging/aur/.SRCINFO aur-pkg/
+cp packaging/aur/PKGBUILD packaging/aur/.SRCINFO aur-pkg/
 cd aur-pkg && git add PKGBUILD .SRCINFO && git commit -m "Initial import 0.1.19" && git push
 ```
 
@@ -40,5 +40,5 @@ under `aur/` in sync so this stays the source of truth.)
 You can't `apt install` on Arch, but you can sanity-check the package or build the AUR pkg:
 
 ```sh
-cd launcher/packaging/aur && makepkg -si   # downloads the release .deb, installs as a pacman pkg
+cd packaging/aur && makepkg -si   # downloads the release .deb, installs as a pacman pkg
 ```

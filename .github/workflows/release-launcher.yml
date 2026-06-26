@@ -1,0 +1,73 @@
+# Build + sign + publish the launcher installers (Windows NSIS + Linux .deb) and the
+# updater manifest to a GitHub Release on THIS (public) repo. Windows auto-updates from
+# the release; the .deb links the system WebKitGTK (no bundled-lib grey screen). Arch
+# users get the AUR package (packaging/aur), which repackages this .deb.
+#
+# Cut a release by pushing a tag:   git tag v0.1.20 && git push origin v0.1.20
+# (bump the version in package.json + src-tauri/Cargo.toml + tauri.conf.json first).
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   TAURI_SIGNING_PRIVATE_KEY           contents of the launcher-update signing key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  the key's passphrase (empty string for now)
+name: Release launcher
+
+on:
+  workflow_dispatch:        # also runnable from the Actions tab
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write          # create the Release + upload assets
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-24.04 ships WebKitGTK 4.1, so the .deb depends on libwebkit2gtk-4.1-0
+        # (Debian 13 / Ubuntu 24.04+ / modern rolling distros). The package links the
+        # system WebKit, so it always matches the user's GPU stack — no grey screen.
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Linux only: the system libs Tauri v2 needs to build the .deb.
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            patchelf build-essential libssl-dev file
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install launcher JS deps (Tauri CLI)
+        run: npm ci
+
+      - name: Build, sign & publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Legends Awakened Launcher ${{ github.ref_name }}'
+          releaseBody: |
+            Windows: signed NSIS installer (auto-updates from this release).
+            Debian/Ubuntu: native `.deb` (links system WebKitGTK — no grey screen).
+            Arch/CachyOS/Manjaro: `yay -S legends-awakened-launcher-bin` (AUR).
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
