@@ -15,7 +15,7 @@ const FALLBACK = {
     settings:{ host:'', room:'', queue:4, fullscreen:true, width:1440, height:1080,
                hd_textures:false, gamescope:false, gamescope_args:'', skip_menu:false } },
   status: { reachable:true, gateway:true, database:true, game_server:true, players:27 },
-  gw_login: { ok:true, screen_name:null }, gw_ticket: { ok:false },
+  gw_login: { ok:true, screen_name:null }, gw_ticket: { ok:false }, gw_ticket_session: { ok:false },
   check_updates: { ok:true }, sync: { ok:true, updated:[], failed:[] },
   session_login: { ok:true, token:'demo-token' }, session_ping: { ok:true }, session_logout: { ok:true },
   friends_list: { ok:true, incoming:[{name:'AshRider'}], outgoing:[{name:'FrostByte'}],
@@ -36,7 +36,7 @@ const DOWNLOAD_URL = 'https://legends-awakened.com';
 const SAVE_KEY = 'la.save';
 const SAVE_DEFAULTS = { element:'fire', session:null,
   board:{ mode:'overall', nation:'fire' },
-  match:{ bot:'ember', diff:'medium', tsize:2 },
+  match:{ bot:'korra', diff:'medium', tsize:2 },
   settings:{
     queue:4, room:'', server:DEFAULT_SERVER, res:'1440x1080',
     hd:false, fullscreen:true, skip_menu:false, gamescope:false, gamescope_args:'' } };
@@ -366,7 +366,13 @@ $('mSeg').addEventListener('click', e=>{ const b=e.target.closest('button'); if(
 $('mRoom').addEventListener('input', e=>{ SAVE.settings.room=e.target.value; persist(); });
 
 // ── Training setup (vs AI) ──────────────────────────────────────────────────────
-const BOTS = ['dummy','target','grunt','ember','rumble','boss'];
+// Roster mirrors the server's BOT_ROSTER (config.py): dummy = stand-still target,
+// target = wanders + dodges (never attacks), korra = full modal AI fighter. Bot "tiers"
+// are gone — strength is the difficulty suffix (easy/medium/hard) the tDiff buttons set.
+const BOTS = ['dummy','target','korra'];
+// A returning user may have an old bot ('ember'/'grunt'/…) saved in localStorage; that code
+// no longer resolves server-side, so training would silently wait for a human. Coerce it.
+if(!BOTS.includes(SAVE.match.bot)){ SAVE.match.bot = 'korra'; persist(); }
 function renderTBots(){
   $('tBots').innerHTML = BOTS.map(b=>
     `<button data-bot="${b}" class="${b===SAVE.match.bot?'on':''}">${b}</button>`).join('');
@@ -434,19 +440,48 @@ function showProg(text, pct){ $('play').style.display='none'; $('prog').style.di
 function resetPlay(){ $('prog').style.display='none'; $('play').style.display='flex'; $('play').disabled=false; updateCTA(); }
 
 
+// Arm the seamless ("Skip-menus") launch with a one-time game-login ticket so the game
+// loads the REAL character. Prefers the DURABLE session token (no password, survives launcher
+// restarts, kept alive by sliding expiry while you keep playing) and only falls back to the
+// in-memory password from this session. The password never reaches the game — only the ticket.
+// Returns {username, ticket} or null when it can't arm (caller warns + launches with a manual login).
+async function armTicket(host){
+  const tok = SAVE.session && SAVE.session.token;
+  if(tok){
+    try{
+      const r = await invoke('gw_ticket_session',{ host, token:tok });
+      if(r && r.ok && r.ticket) return { username:r.name || SAVE.session.name, ticket:r.ticket };
+      // token died server-side — drop it so the UI reflects signed-out, then try the password
+      if(r && /signed in/.test(r.error||'')){ SAVE.session.token=null; persist(); }
+    }catch{}
+  }
+  if(SAVE.session && sessionPass){
+    try{
+      const r = await invoke('gw_ticket',{ host, username:SAVE.session.name, password:sessionPass });
+      if(r && r.ok && r.ticket){
+        // re-open a durable session too, so the NEXT Play needs no password (survives restart)
+        try{ const s=await invoke('session_login',{ host, username:SAVE.session.name, password:sessionPass });
+          if(s && s.ok && s.token){ SAVE.session.token=s.token; persist(); } }catch{}
+        return { username:SAVE.session.name, ticket:r.ticket };
+      }
+    }catch{}
+  }
+  return null;
+}
+
 async function play(roomOverride, queueOverride){
   if(!found){ return locate(); }   // PLAY doubles as "locate game" when not found
   const settings=gather();
   if(roomOverride!=null) settings.room=roomOverride;       // training: transient bot room, never persisted
   if(queueOverride!=null) settings.queue=queueOverride;
-  // Seamless identity: mint a one-time ticket from the signed-in session so the game loads the
-  // REAL character. Password is memory-only; a resumed session without it falls back to default.
+  // Seamless identity: mint a ticket from the signed-in session so the game loads the REAL
+  // character. Don't silently launch unarmed — warn so the player knows it'll be a manual login.
   let username=null, ticket=null;
-  if(settings.skip_menu && SAVE.session && sessionPass){
-    try{ const r=await invoke('gw_ticket',{ host:settings.host, username:SAVE.session.name, password:sessionPass });
-      if(r && r.ok && r.ticket){ username=SAVE.session.name; ticket=r.ticket; }
-      else toast('Could not get a login ticket — using the default character.','err');
-    }catch(e){ toast('Ticket error: '+e,'err'); }
+  if(settings.skip_menu){
+    const armed = SAVE.session ? await armTicket(settings.host) : null;
+    if(armed){ username=armed.username; ticket=armed.ticket; }
+    else if(SAVE.session){ toast('Couldn’t arm your account — sign in again. Launching with a manual login.','err'); }
+    else { toast('Not signed in — launching with a manual login.','err'); }
   }
   // AUTO-LOGIN: with Skip-menus on + a ticket, the DLL submits this account's login in-game (fast)
   // and hands the menu to the player — so you never type the in-game login again. The launcher's job
@@ -667,8 +702,26 @@ $('close').addEventListener('click', ()=>{ const w=getWin(); if(w) w.close(); })
 // initial paint: theme first (instant), then async backend reconcile
 setElement(SAVE.element || 'fire');
 renderBoard();
-if(SAVE.session){ showChip(SAVE.session.name); loginEl.classList.add('hide'); startPresence(); loadFriends(); }
-else { showChip(null); setTimeout(()=>$('liUser').focus(), 60); loadFriends(); }
+// Restore a remembered session. The bearer token is persisted (localStorage) and kept alive by
+// the gateway's sliding expiry, so you stay signed in across launcher restarts and never re-type
+// a password between matches. Verify the token on boot; if the server says it's expired, drop to
+// the sign-in prompt (username stays prefilled) rather than looking signed-in but failing Play.
+async function restoreSession(){
+  if(!SAVE.session){ showChip(null); setTimeout(()=>$('liUser').focus(), 60); loadFriends(); return; }
+  showChip(SAVE.session.name); loginEl.classList.add('hide');
+  const tok = SAVE.session.token;
+  if(tok){
+    try{ const r=await invoke('session_ping',{ host:SAVE.settings.server, token:tok });
+      if(r && r.ok===false && /signed in/.test(r.error||'')){
+        SAVE.session.token=null; persist();           // expired — keep the name for a one-tap re-sign-in
+        $('liUser').value=SAVE.session.name; loginEl.classList.remove('hide');
+        toast('Your session expired — sign in once to keep playing.','err');
+      }
+    }catch{}                                            // server unreachable → stay optimistic, retry later
+  }
+  startPresence(); loadFriends();
+}
+restoreSession();
 startParticles();
 updateCTA();   // Home → the bottom button reads "MATCH"
 refresh().then(()=>{ pollStatus(); checkForUpdates(false); checkLauncherUpdate(); loadBoard(); });

@@ -241,14 +241,20 @@ fn write_quickmatch(dir: &Path, enabled: bool, logged_in: bool) {
         vec![
             ("enabled", "1"),
             ("local_login", "1"),
-            ("login_activate", "login screen"),
-            ("login_submit", "4 state button_login"),
+            // Match the successful manual path: seed the login fields, then let the game's
+            // real Login button graph run. Activating the child behavior directly logs in, but
+            // leaves later Multiplayer/Play in a bad menu state.
+            ("login_activate", ""),
+            ("login_submit", ""),
             ("login_seq", ""),
+            ("type_login", "1"),
+            ("submit_obj", "btn_t_l_log_1"),
             ("char_seq", ""),            // STOP after login — hand the menu to the player
             ("queue_after_login", "0"),  // don't drive char-select / queue
-            ("set_nation", "0"), ("set_custom", ""), ("set_online", "0"), // NO forcing
+            ("set_nation", "0"), ("set_custom", ""),
+            ("set_online", "0"),
             ("orchestrate", "0"),        // game shown normally (no cover/reveal hackery)
-            ("login_gap_ms", "500"),     // fast: minimal pause between the login steps
+            ("login_gap_ms", "650"),     // short frame-paced gap between real menu clicks
         ]
     } else {
         vec![("enabled", "0")]   // not logged in → classic client (manual login)
@@ -269,6 +275,17 @@ fn write_game_creds(dir: &Path, username: &str, ticket: &str) {
 // ticket never lingers.
 fn quickmatch_creds(dir: &Path) -> PathBuf { dir.join("BuildingBlocks").join("zz_quickmatch.creds") }
 fn clear_game_creds(dir: &Path) { let _ = fs::remove_file(quickmatch_creds(dir)); }
+
+fn write_launch_debug(dir: &Path, exe_path: &Path, auto_login: bool, skip_env: &str, auto_login_env: &str) {
+    let body = format!(
+        "exe={}\nauto_login={}\nAVATAR_SKIP_MENUS={}\nAVATAR_AUTO_LOGIN={}\n",
+        exe_path.display(),
+        if auto_login { 1 } else { 0 },
+        skip_env,
+        auto_login_env
+    );
+    let _ = fs::write(dir.join("launcher_last_play.env"), body);
+}
 
 // ---- INI helpers (line-preserving) ------------------------------------------
 fn arena_ini(dir: &Path) -> PathBuf { dir.join("BuildingBlocks").join("arena_link.ini") }
@@ -869,15 +886,20 @@ fn gamescope_available() -> bool {
 // `gamescope`/`gamescope_args` come from the launcher's Display toggle (Linux only).
 // Env vars (AVATAR_GAMESCOPE / AVATAR_GAMESCOPE_ARGS / AVATAR_VK_ICD) still override.
 #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
-fn spawn_game(dir: &Path, exe_path: &Path, skip_menu: bool, gamescope: bool, gamescope_args: &str,
+fn spawn_game(dir: &Path, exe_path: &Path, auto_login: bool, gamescope: bool, gamescope_args: &str,
               width: u32, height: u32, fullscreen: bool) -> Result<(), String> {
     use std::process::Command;
-    // The DLL's skip-menus drive is gated on the AVATAR_SKIP_MENUS env (so a leftover ini never hijacks
-    // a manually-launched classic client). The launcher sets it ONLY on the game it spawns for Play.
-    let skip_env = if skip_menu { "1" } else { "0" };
+    // Login-only is not skip/queue. Keep the old skip env off for Auto sign-in and use a separate
+    // marker so the DLL installs only the login driver + observers, not the queue-era hooks.
+    let skip_env = "0";
+    let auto_login_env = if auto_login { "1" } else { "0" };
+    write_launch_debug(dir, exe_path, auto_login, skip_env, auto_login_env);
     #[cfg(target_os = "windows")]
     {
-        Command::new(exe_path).current_dir(dir).env("AVATAR_SKIP_MENUS", skip_env).spawn()
+        Command::new(exe_path).current_dir(dir)
+            .env("AVATAR_SKIP_MENUS", skip_env)
+            .env("AVATAR_AUTO_LOGIN", auto_login_env)
+            .spawn()
             .map_err(|e| format!("launch {}: {e}", exe_path.display()))?;
     }
     #[cfg(not(target_os = "windows"))]
@@ -915,6 +937,7 @@ fn spawn_game(dir: &Path, exe_path: &Path, skip_menu: bool, gamescope: bool, gam
                 cmd.arg("gamescope");
                 cmd.current_dir(dir);
                 cmd.env("AVATAR_SKIP_MENUS", skip_env);
+                cmd.env("AVATAR_AUTO_LOGIN", auto_login_env);
                 if let Some(p) = &prefix { cmd.env("WINEPREFIX", p); }
                 if let Ok(icd) = std::env::var("AVATAR_VK_ICD") { cmd.env("VK_ICD_FILENAMES", icd); }
                 // Args from the toggle's field, then the env override, else AUTO:
@@ -951,6 +974,7 @@ fn spawn_game(dir: &Path, exe_path: &Path, skip_menu: bool, gamescope: bool, gam
         let mut cmd = Command::new("wine");
         cmd.arg(exe_path).current_dir(dir);
         cmd.env("AVATAR_SKIP_MENUS", skip_env);
+        cmd.env("AVATAR_AUTO_LOGIN", auto_login_env);
         if let Some(p) = prefix { cmd.env("WINEPREFIX", p); }
         cmd.spawn().map_err(|e|
             format!("launch via wine ({}): {e} — is wine installed?", exe_path.display()))?;
@@ -994,7 +1018,7 @@ async fn play(settings: Settings, windowed: bool, username: Option<String>, tick
     // Config.ini (hardcoded 800x600 top-left), so only use it as a last-resort fallback.
     let windowed_exe = dir.join("AvatarMP_Windowed.exe");
     let target = if windowed_exe.is_file() { windowed_exe } else { dir.join("AvatarMP.exe") };
-    spawn_game(&dir, &target, s.skip_menu, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen)
+    spawn_game(&dir, &target, logged_in, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen)
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -1168,6 +1192,17 @@ async fn session_ping(host: String, token: String) -> serde_json::Value {
 }
 
 #[tauri::command]
+async fn gw_ticket_session(host: String, token: String) -> serde_json::Value {
+    // Mint a fresh short-lived game-login ticket from a LIVE session token — no
+    // password. The launcher signs in once (session_login → token, persisted) and
+    // re-mints a ticket here per Play, so multiple matches never re-prompt for a
+    // password and the password never leaves the launcher after the first sign-in.
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/session/ticket", Some(&token), serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
 async fn session_logout(host: String, token: String) -> serde_json::Value {
     tauri::async_runtime::spawn_blocking(move ||
         gw_json(&host, "POST", "/session/logout", Some(&token), serde_json::json!({}))
@@ -1245,7 +1280,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
