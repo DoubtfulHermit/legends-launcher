@@ -9,7 +9,7 @@ never bundle our own (that's what made the old AppImage grey-screen on rolling d
 |----------|----------|------------------|---------|
 | Windows | `*_x64-setup.exe` (NSIS) | run the installer | in-app auto-update |
 | Debian / Ubuntu / Mint / Pop | `*_amd64.deb` | `sudo apt install ./*.deb` | redownload (or apt repo, later) |
-| Arch / CachyOS / Manjaro | `*.pkg.tar.zst` (release asset) | `sudo pacman -U <url>` | redownload |
+| Arch / CachyOS / Manjaro | `*.pkg.tar.zst` (release asset) | download, then `sudo pacman -U ./<file>` | redownload |
 | Arch (once AUR is up) | AUR `legends-awakened-launcher-bin` | `yay -S legends-awakened-launcher-bin` | `yay -Syu` |
 
 The `.exe`, `.deb` and updater manifest are built + published automatically by
@@ -37,7 +37,16 @@ makepkg -f                                   # downloads the release .deb, build
 gh release upload v<ver> *.pkg.tar.zst --repo DoubtfulHermit/legends-launcher --clobber
 ```
 
-Arch users then: `sudo pacman -U <pkg-url-from-the-release>`.
+Arch users then **download then install the local file** (a remote `pacman -U <url>`
+fails: pacman's default `RemoteFileSigLevel = Required` looks for a `.sig` we don't ship;
+local installs use `LocalFileSigLevel = Optional`, so no sig is needed):
+
+```sh
+curl -LO "https://github.com/DoubtfulHermit/legends-launcher/releases/download/v<ver>/legends-awakened-launcher-bin-<ver>-1-x86_64.pkg.tar.zst"
+sudo pacman -U ./legends-awakened-launcher-bin-<ver>-1-x86_64.pkg.tar.zst
+```
+
+(Or `cd packaging/aur && makepkg -si`, which downloads + builds + installs locally in one step.)
 
 ## AUR (the `yay` convenience path — when registration is open)
 AUR periodically disables new-account registration. When it's open, publish the same
