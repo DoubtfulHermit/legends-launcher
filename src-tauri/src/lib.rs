@@ -1167,17 +1167,15 @@ async fn friend_remove(host: String, token: String, who: String) -> serde_json::
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // WebKitGTK on Linux/Wayland renders a grey/blank window — or fails EGL init outright
-    // (`Could not create default EGL display: EGL_BAD_PARAMETER`) — because the AppImage's
-    // bundled, older GL/EGL/WebKit libs can't talk to a fresh (rolling-release) system GPU
-    // stack. Force a compatible path before the WebView starts: XWayland + no GPU
-    // compositing/DMABUF. No-op on X11; harmless on Windows/macOS. Each respects an
-    // explicit user override.
+    // WebKitGTK on Linux renders a grey/blank window when its DMABUF renderer can't
+    // negotiate a buffer with the system GPU stack (common on AMD/Mesa + Wayland).
+    // Disabling that one renderer fixes it while staying on the NATIVE backend.
+    // Do NOT force GDK_BACKEND=x11 — on a modern Wayland/AMD stack XWayland is what
+    // produces the grey box (verified on RX 9070 / WebKitGTK 2.52). No-op on X11;
+    // harmless on Windows/macOS. Respects an explicit user override.
     #[cfg(target_os = "linux")]
     for (k, v) in [
-        ("GDK_BACKEND", "x11"),                       // route through XWayland (compatible EGL)
-        ("WEBKIT_DISABLE_COMPOSITING_MODE", "1"),     // works on the bundled older WebKit
-        ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),      // works on newer WebKit
+        ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
     ] {
         if std::env::var_os(k).is_none() { std::env::set_var(k, v); }
     }

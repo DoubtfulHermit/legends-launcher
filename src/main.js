@@ -180,14 +180,27 @@ function startPresence(){
     invoke('session_ping',{ host:SAVE.settings.server, token:t }).catch(()=>{}); };
   ping(); presenceTimer = setInterval(ping, 30000);
 }
+// Toast on friend-graph changes between polls. Primed on the first load after
+// sign-in so an existing backlog of requests/friends doesn't fire a toast storm.
+let _frPrimed = false, _seenIncoming = new Set(), _seenFriends = new Set();
+function _frResetNotify(){ _frPrimed=false; _seenIncoming=new Set(); _seenFriends=new Set(); }
+function _notifyFriendChanges(incoming, friends){
+  const inc = incoming.map(f=>f.name), fr = friends.map(f=>f.name);
+  if(_frPrimed){
+    for(const n of inc) if(!_seenIncoming.has(n)) toast(n+' wants to be your friend','ok');
+    for(const n of fr)  if(!_seenFriends.has(n))  toast(n+' is now your friend','ok');
+  }
+  _seenIncoming = new Set(inc); _seenFriends = new Set(fr); _frPrimed = true;
+}
 async function loadFriends(){
-  if(!_tok()){ $('frList').innerHTML=''; $('frReqs').hidden=true; $('frCount').textContent=''; $('frEmpty').hidden=false; return; }
+  if(!_tok()){ $('frList').innerHTML=''; $('frReqs').hidden=true; $('frCount').textContent=''; $('frEmpty').hidden=false; _frResetNotify(); return; }
   $('frEmpty').hidden = true;
   let r; try{ r = await invoke('friends_list',{ host:SAVE.settings.server, token:_tok() }); }catch{ return; }
   if(!r || !r.ok){
-    if(r && /signed in/.test(r.error||'')){ SAVE.session.token=null; persist(); $('frEmpty').hidden=false; }
+    if(r && /signed in/.test(r.error||'')){ SAVE.session.token=null; persist(); $('frEmpty').hidden=false; _frResetNotify(); }
     return;
   }
+  _notifyFriendChanges(r.incoming||[], r.friends||[]);
   renderFriends(r.friends||[], r.incoming||[], r.outgoing||[]);
 }
 function renderFriends(friends, incoming, outgoing){
