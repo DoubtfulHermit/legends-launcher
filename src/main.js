@@ -17,6 +17,10 @@ const FALLBACK = {
   status: { reachable:true, gateway:true, database:true, game_server:true, players:27 },
   gw_login: { ok:true, screen_name:null }, gw_ticket: { ok:false },
   check_updates: { ok:true }, sync: { ok:true, updated:[], failed:[] },
+  session_login: { ok:true, token:'demo-token' }, session_ping: { ok:true }, session_logout: { ok:true },
+  friends_list: { ok:true, incoming:[{name:'AshRider'}], outgoing:[{name:'FrostByte'}],
+    friends:[{name:'KorraMain',state:'online'},{name:'BoulderKing',state:'in-game'},{name:'Zephyra',state:'offline'}] },
+  friend_request: { ok:true }, friend_respond: { ok:true }, friend_remove: { ok:true },
 };
 const invoke = HAS_TAURI ? TAURI.core.invoke
   : async (cmd) => { return Object.prototype.hasOwnProperty.call(FALLBACK, cmd) ? FALLBACK[cmd] : null; };
@@ -146,6 +150,10 @@ async function signIn(){
       loginEl.classList.add('hide');
       $('liPass').value='';
       toast('Signed in as '+name, 'ok');
+      // open a social session (bearer token) for friends + presence — best-effort
+      try{ const s=await invoke('session_login',{ host:server, username:name, password:pass });
+        if(s && s.ok && s.token){ SAVE.session.token=s.token; persist(); } }catch{}
+      startPresence(); loadFriends();
     } else {
       err.textContent=(r && r.error) || 'Login failed.';
     }
@@ -153,12 +161,84 @@ async function signIn(){
   btn.disabled=false; btn.innerHTML='SIGN IN &#9658;';
 }
 function signOut(){
+  if(SAVE.session && SAVE.session.token)
+    invoke('session_logout',{ host:SAVE.settings.server, token:SAVE.session.token }).catch(()=>{});
   SAVE.session=null; sessionPass=''; persist();
   $('liPass').value=''; $('liErr').textContent='';
   showChip(null); acctMenu.classList.remove('open');
   loginEl.classList.remove('hide'); $('liUser').focus();
+  loadFriends();   // clear the panel → sign-in prompt
 }
 $('liGo').addEventListener('click', signIn);
+
+// ── friends + presence (F3) ────────────────────────────────────────────────────
+const _tok = () => (SAVE.session && SAVE.session.token) || null;
+let presenceTimer = null;
+function startPresence(){
+  if(presenceTimer) return;
+  const ping = () => { const t=_tok(); if(t && !document.hidden)
+    invoke('session_ping',{ host:SAVE.settings.server, token:t }).catch(()=>{}); };
+  ping(); presenceTimer = setInterval(ping, 30000);
+}
+async function loadFriends(){
+  if(!_tok()){ $('frList').innerHTML=''; $('frReqs').hidden=true; $('frCount').textContent=''; $('frEmpty').hidden=false; return; }
+  $('frEmpty').hidden = true;
+  let r; try{ r = await invoke('friends_list',{ host:SAVE.settings.server, token:_tok() }); }catch{ return; }
+  if(!r || !r.ok){
+    if(r && /signed in/.test(r.error||'')){ SAVE.session.token=null; persist(); $('frEmpty').hidden=false; }
+    return;
+  }
+  renderFriends(r.friends||[], r.incoming||[], r.outgoing||[]);
+}
+function renderFriends(friends, incoming, outgoing){
+  const online = friends.filter(f=>f.state && f.state!=='offline').length;
+  $('frCount').textContent = friends.length ? `${online}/${friends.length} online` : '';
+  const reqs = $('frReqs'); reqs.innerHTML='';
+  for(const f of incoming){
+    const row=document.createElement('div'); row.className='fr-req';
+    row.innerHTML='<span class="tag">adds you</span><span class="nm"></span>'
+      +'<button class="yes" title="Accept">&#10003;</button><button class="no" title="Decline">&#10005;</button>';
+    row.querySelector('.nm').textContent=f.name;
+    row.querySelector('.yes').onclick=()=>respondFriend(f.name,true);
+    row.querySelector('.no').onclick=()=>respondFriend(f.name,false);
+    reqs.appendChild(row);
+  }
+  for(const f of outgoing){
+    const row=document.createElement('div'); row.className='fr-req';
+    row.innerHTML='<span class="nm"></span><span class="tag">pending</span>';
+    row.querySelector('.nm').textContent=f.name;
+    reqs.appendChild(row);
+  }
+  reqs.hidden = !(incoming.length || outgoing.length);
+  const list = $('frList'); list.innerHTML='';
+  if(!friends.length){ list.innerHTML='<div class="fr-empty">No friends yet — add someone by name.</div>'; return; }
+  for(const f of friends){
+    const st = f.state || 'offline';
+    const row=document.createElement('div'); row.className='fr-row '+st;
+    row.innerHTML='<span class="dot"></span><span class="nm"></span><span class="st"></span><button class="x" title="Remove">&#10005;</button>';
+    row.querySelector('.nm').textContent=f.name;
+    row.querySelector('.st').textContent = st==='in-game' ? 'in a match' : st;
+    row.querySelector('.x').onclick=()=>removeFriend(f.name);
+    list.appendChild(row);
+  }
+}
+async function addFriend(){
+  const name=$('frAddName').value.trim(); if(!name || !_tok()) return;
+  const r=await invoke('friend_request',{ host:SAVE.settings.server, token:_tok(), to:name }).catch(()=>null);
+  if(r && r.ok){ $('frAddName').value=''; toast('Friend request sent to '+name,'ok'); loadFriends(); }
+  else toast((r && r.error) || 'Could not send request.','err');
+}
+async function respondFriend(from, accept){
+  const r=await invoke('friend_respond',{ host:SAVE.settings.server, token:_tok(), from, accept }).catch(()=>null);
+  if(r && r.ok) loadFriends(); else toast((r && r.error) || 'Failed.','err');
+}
+async function removeFriend(who){
+  const r=await invoke('friend_remove',{ host:SAVE.settings.server, token:_tok(), who }).catch(()=>null);
+  if(r && r.ok) loadFriends();
+}
+$('frAddBtn').addEventListener('click', addFriend);
+$('frAddName').addEventListener('keydown', e=>{ if(e.key==='Enter') addFriend(); });
+setInterval(()=>{ if(!document.hidden && !$('view-home').hidden) loadFriends(); }, 20000);
 $('liPass').addEventListener('keydown', e=>{ if(e.key==='Enter') signIn(); });
 $('liUser').addEventListener('keydown', e=>{ if(e.key==='Enter') $('liPass').focus(); });
 $('liServer').addEventListener('input', ()=>{ SAVE.settings.server=$('liServer').value.trim(); persist(); });
@@ -511,8 +591,8 @@ $('close').addEventListener('click', ()=>{ const w=getWin(); if(w) w.close(); })
 // initial paint: theme first (instant), then async backend reconcile
 setElement(SAVE.element || 'fire');
 renderBoard();
-if(SAVE.session){ showChip(SAVE.session.name); loginEl.classList.add('hide'); }
-else { showChip(null); setTimeout(()=>$('liUser').focus(), 60); }
+if(SAVE.session){ showChip(SAVE.session.name); loginEl.classList.add('hide'); startPresence(); loadFriends(); }
+else { showChip(null); setTimeout(()=>$('liUser').focus(), 60); loadFriends(); }
 startParticles();
 refresh().then(()=>{ pollStatus(); checkForUpdates(false); checkLauncherUpdate(); loadBoard(); });
 setInterval(pollStatus, 12000);

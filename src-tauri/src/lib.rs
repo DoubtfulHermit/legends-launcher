@@ -1088,6 +1088,83 @@ async fn gw_ticket(host: String, username: String, password: String) -> TicketOu
     }).await.unwrap_or_default()
 }
 
+// ---- launcher social: proxy the gateway's /session + /friends endpoints --------
+// Like gw_login, these go through Rust (not webview fetch) to reuse the https→http
+// fallback and dodge CORS. The bearer token (from session_login) is forwarded as
+// `Authorization: Bearer`. Each returns the gateway's JSON ({ok, …} or {ok:false,error}).
+fn gw_json(host: &str, method: &str, path: &str, token: Option<&str>,
+           body: serde_json::Value) -> serde_json::Value {
+    let host = host.trim().trim_end_matches('/');
+    if host.is_empty() {
+        return serde_json::json!({"ok": false, "error": "No server set."});
+    }
+    let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(10)).build();
+    for scheme in ["https", "http"] {
+        let url = format!("{scheme}://{host}{path}");
+        let mut req = if method == "GET" { agent.get(&url) } else { agent.post(&url) };
+        if let Some(t) = token { req = req.set("Authorization", &format!("Bearer {t}")); }
+        let res = if method == "GET" { req.call() } else { req.send_json(body.clone()) };
+        match res {
+            Ok(resp) | Err(ureq::Error::Status(_, resp)) =>
+                return resp.into_json::<serde_json::Value>()
+                    .unwrap_or_else(|_| serde_json::json!({"ok": false, "error": "bad response"})),
+            Err(_) => continue, // transport error → try the other scheme
+        }
+    }
+    serde_json::json!({"ok": false, "error": "Couldn't reach the server."})
+}
+
+#[tauri::command]
+async fn session_login(host: String, username: String, password: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/session/login", None,
+                serde_json::json!({"name": username, "password": password}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false, "error": "internal error"}))
+}
+
+#[tauri::command]
+async fn session_ping(host: String, token: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/session/ping", Some(&token), serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn session_logout(host: String, token: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/session/logout", Some(&token), serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn friends_list(host: String, token: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "GET", "/friends/list", Some(&token), serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn friend_request(host: String, token: String, to: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/friends/request", Some(&token), serde_json::json!({"to": to}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn friend_respond(host: String, token: String, from: String, accept: bool) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/friends/respond", Some(&token),
+                serde_json::json!({"from": from, "accept": accept}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn friend_remove(host: String, token: String, who: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/friends/remove", Some(&token), serde_json::json!({"who": who}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // WebKitGTK on Linux/Wayland renders a grey/blank window — or fails EGL init outright
@@ -1132,7 +1209,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
