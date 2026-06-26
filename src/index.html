@@ -60,11 +60,20 @@
           <span class="fr-count" id="frCount"></span>
           <button class="fr-addtoggle" id="frAddToggle" title="Add a friend" hidden>+ Add</button>
         </div>
-        <div class="fr-add" id="frAdd" hidden>
-          <input id="frAddName" placeholder="add a friend by name" spellcheck="false" autocomplete="off">
-          <button id="frAddBtn">Add</button>
+        <div class="fr-tabs" id="frTabs" hidden>
+          <button data-tab="friends" class="on">Friends</button>
+          <button data-tab="requests">Requests<i class="fr-badge" id="frReqBadge" hidden>0</i></button>
+          <button data-tab="blocked">Blocked</button>
         </div>
-        <div class="fr-reqs" id="frReqs" hidden></div>
+        <div class="fr-add" id="frAdd" hidden>
+          <div class="fr-add-row">
+            <input id="frAddName" placeholder="add a friend by name" spellcheck="false" autocomplete="off">
+            <button id="frAddBtn">Add</button>
+          </div>
+          <div class="fr-recent" id="frRecent"></div>
+        </div>
+        <input class="fr-search" id="frSearch" placeholder="Search friends&hellip;" spellcheck="false" hidden>
+        <div class="fr-invites" id="frInvites"></div>
         <div class="fr-list" id="frList"></div>
         <div class="fr-empty" id="frEmpty" hidden>Sign in to add friends and see who&rsquo;s online.</div>
       </div>

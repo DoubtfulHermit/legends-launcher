@@ -18,9 +18,29 @@ const FALLBACK = {
   gw_login: { ok:true, screen_name:null }, gw_ticket: { ok:false }, gw_ticket_session: { ok:false },
   check_updates: { ok:true }, sync: { ok:true, updated:[], failed:[] },
   session_login: { ok:true, token:'demo-token' }, session_ping: { ok:true }, session_logout: { ok:true },
-  friends_list: { ok:true, incoming:[{name:'AshRider'}], outgoing:[{name:'FrostByte'}],
-    friends:[{name:'KorraMain',state:'online'},{name:'BoulderKing',state:'in-game'},{name:'Zephyra',state:'offline'}] },
+  // Rich demo bundle so the social panel is fully previewable in a plain browser (no Tauri).
+  friends_list: { ok:true, me:'Aang',
+    friends:[
+      {name:'KorraMain', nickname:'Korra', favorite:true,  state:'in-game', last_seen:Date.now()/1000-20,    since:1718000000},
+      {name:'BoulderKing',nickname:'',      favorite:true,  state:'online',  last_seen:Date.now()/1000-10,    since:1719500000},
+      {name:'Zephyra',    nickname:'',      favorite:false, state:'online',  last_seen:Date.now()/1000-5,     since:1717000000},
+      {name:'AshRider',   nickname:'',      favorite:false, state:'online',  last_seen:Date.now()/1000-40,    since:1720100000},
+      {name:'TidebornNn', nickname:'Tide',  favorite:false, state:'away',    last_seen:Date.now()/1000-180,   since:1716000000},
+      {name:'GaleStorm',  nickname:'',      favorite:false, state:'away',    last_seen:Date.now()/1000-240,   since:1721000000},
+      {name:'Inferna',    nickname:'',      favorite:false, state:'offline', last_seen:Date.now()/1000-7200,  since:1715000000},
+      {name:'TerraNova',  nickname:'',      favorite:false, state:'offline', last_seen:Date.now()/1000-90000, since:1714000000},
+      {name:'FrostByte',  nickname:'',      favorite:false, state:'offline', last_seen:Date.now()/1000-400000,since:1722000000},
+    ],
+    incoming:[{name:'SkyDancer'},{name:'GraniteFist'}],
+    outgoing:[{name:'Zenith'}],
+    invites:[{from:'BoulderKing', room_code:'p-a1b2c3', size:4, expires:Date.now()/1000+120}],
+    blocked:[{name:'Spammer99'}],
+    counts:{ online:6, total:9, requests:2, invites:1 } },
+  friends_recent: { ok:true, recent:[{name:'Zenith'},{name:'TidebornNn'},{name:'GraniteFist'},{name:'SkyDancer'}] },
   friend_request: { ok:true }, friend_respond: { ok:true }, friend_remove: { ok:true },
+  friend_cancel: { ok:true }, friend_block: { ok:true }, friend_unblock: { ok:true },
+  friend_favorite: { ok:true }, friend_nickname: { ok:true },
+  invite_send: { ok:true, room_code:'p-demo', size:2 }, invite_respond: { ok:true, room_code:'p-demo', size:2 },
 };
 const invoke = HAS_TAURI ? TAURI.core.invoke
   : async (cmd) => { return Object.prototype.hasOwnProperty.call(FALLBACK, cmd) ? FALLBACK[cmd] : null; };
@@ -171,107 +191,357 @@ function signOut(){
 }
 $('liGo').addEventListener('click', signIn);
 
-// ── friends + presence (F3) ────────────────────────────────────────────────────
+// ── friends + presence (social) ─────────────────────────────────────────────
 const _tok = () => (SAVE.session && SAVE.session.token) || null;
+const _srv = () => SAVE.settings.server;
 let presenceTimer = null;
 function startPresence(){
   if(presenceTimer) return;
   const ping = () => { const t=_tok(); if(t && !document.hidden)
-    invoke('session_ping',{ host:SAVE.settings.server, token:t }).catch(()=>{}); };
+    invoke('session_ping',{ host:_srv(), token:t }).catch(()=>{}); };
   ping(); presenceTimer = setInterval(ping, 30000);
 }
-// Toast on friend-graph changes between polls. Primed on the first load after
-// sign-in so an existing backlog of requests/friends doesn't fire a toast storm.
-let _frPrimed = false, _seenIncoming = new Set(), _seenFriends = new Set();
-function _frResetNotify(){ _frPrimed=false; _seenIncoming=new Set(); _seenFriends=new Set(); }
-function _notifyFriendChanges(incoming, friends){
-  const inc = incoming.map(f=>f.name), fr = friends.map(f=>f.name);
-  if(_frPrimed){
-    for(const n of inc) if(!_seenIncoming.has(n)) toast(n+' wants to be your friend','ok');
-    for(const n of fr)  if(!_seenFriends.has(n))  toast(n+' is now your friend','ok');
-  }
-  _seenIncoming = new Set(inc); _seenFriends = new Set(fr); _frPrimed = true;
+// thin invoke that injects host + token and swallows transport errors (null on signed-out/fail)
+async function sx(cmd, extra){ const t=_tok(); if(!t) return null;
+  try{ return await invoke(cmd, { host:_srv(), token:t, ...(extra||{}) }); }catch{ return null; } }
+
+// ── social state ──
+let frTab = 'friends';
+let frData = { me:'', friends:[], incoming:[], outgoing:[], invites:[], blocked:[], counts:{} };
+let frSearch = '';
+let frRecent = [];
+
+// ── presentation helpers ──
+const esc = s => String(s==null?'':s);
+function initials(n){ n=esc(n).trim(); return (n[0]||'?').toUpperCase(); }
+// deterministic per-name hue so avatars are distinct but stay in the dark, muted theme
+function nameHue(n){ let h=0; n=esc(n); for(let i=0;i<n.length;i++) h=(h*31 + n.charCodeAt(i))>>>0; return h%360; }
+function avatarHTML(name, big){
+  const h=nameHue(name), sz=big?'fr-av big':'fr-av';
+  return `<span class="${sz}" style="--ah:${h}">${initials(name)}</span>`;
 }
-// Distinguish "not signed in" from "signed in but social server unreachable".
+function relTime(sec){
+  if(!sec) return '';
+  const d=Math.max(0, Date.now()/1000 - Number(sec));
+  if(d<60) return 'just now';
+  if(d<3600) return Math.floor(d/60)+'m ago';
+  if(d<86400) return Math.floor(d/3600)+'h ago';
+  return Math.floor(d/86400)+'d ago';
+}
+const STATE_WORD = { 'in-game':'In a match', online:'Online', away:'Away', offline:'Offline' };
+function statusText(f){
+  if(f.state==='offline') return f.last_seen ? ('Last seen '+relTime(f.last_seen)) : 'Offline';
+  return STATE_WORD[f.state] || 'Offline';
+}
+const dispName = f => (f.nickname || f.name);
+
+// ── change notifications (toast new incoming requests + new invites between polls) ──
+let _frPrimed=false, _seenInc=new Set(), _seenInv=new Set();
+function _resetNotify(){ _frPrimed=false; _seenInc=new Set(); _seenInv=new Set(); }
+function _notify(d){
+  const inc=(d.incoming||[]).map(f=>f.name), inv=(d.invites||[]).map(i=>i.from);
+  if(_frPrimed){
+    for(const n of inc) if(!_seenInc.has(n)) toast(n+' wants to be your friend','ok');
+    for(const n of inv) if(!_seenInv.has(n)) toast(n+' invited you to a match','ok');
+  }
+  _seenInc=new Set(inc); _seenInv=new Set(inv); _frPrimed=true;
+}
+
+// ── signed-out / unreachable empty state ──
+function _hideShell(hide){
+  for(const id of ['frTabs','frSearch','frInvites','frList']) $(id).hidden = hide && id!=='frList';
+  if(hide){ $('frList').innerHTML=''; $('frInvites').innerHTML=''; }
+}
 function frShowEmpty(){
   const signedIn = !!(SAVE.session && SAVE.session.name);
-  $('frList').innerHTML=''; $('frReqs').hidden=true; $('frCount').textContent='';
-  $('frAdd').hidden=true; $('frAddToggle').hidden=true;
+  closeMenus(); _hideShell(true);
+  $('frCount').textContent=''; $('frAdd').hidden=true; $('frAddToggle').hidden=true; $('frSearch').hidden=true;
   const el=$('frEmpty');
   if(signedIn){
     el.innerHTML='Couldn’t reach the social server. <a href="#" id="frRetry">Retry</a>';
     const rt=$('frRetry'); if(rt) rt.onclick=e=>{ e.preventDefault(); retrySocial(); };
-  } else {
-    el.textContent='Sign in to add friends and see who’s online.';
-  }
+  } else { el.textContent='Sign in to add friends and see who’s online.'; }
   el.hidden=false;
 }
 async function retrySocial(){
   if(!(SAVE.session && SAVE.session.name)) return;
   if(!sessionPass){ toast('Sign out and back in to reconnect.','err'); return; }
-  try{ const s=await invoke('session_login',{ host:SAVE.settings.server, username:SAVE.session.name, password:sessionPass });
+  try{ const s=await invoke('session_login',{ host:_srv(), username:SAVE.session.name, password:sessionPass });
     if(s && s.ok && s.token){ SAVE.session.token=s.token; persist(); startPresence(); loadFriends(); toast('Reconnected.','ok'); return; }
   }catch{}
   toast('Still can’t reach the social server.','err');
 }
+
+// ── load + render ──
 async function loadFriends(){
-  if(!_tok()){ frShowEmpty(); _frResetNotify(); return; }
-  $('frEmpty').hidden = true; $('frAddToggle').hidden = false;
-  let r; try{ r = await invoke('friends_list',{ host:SAVE.settings.server, token:_tok() }); }catch{ return; }
+  if(!_tok()){ frShowEmpty(); _resetNotify(); return; }
+  $('frEmpty').hidden=true; $('frAddToggle').hidden=false; _hideShell(false);
+  let r; try{ r = await invoke('friends_list',{ host:_srv(), token:_tok() }); }catch{ return; }
   if(!r || !r.ok){
-    if(r && /signed in/.test(r.error||'')){ SAVE.session.token=null; persist(); frShowEmpty(); _frResetNotify(); }
+    if(r && /signed in/.test(r.error||'')){ SAVE.session.token=null; persist(); frShowEmpty(); _resetNotify(); }
     return;
   }
-  _notifyFriendChanges(r.incoming||[], r.friends||[]);
-  renderFriends(r.friends||[], r.incoming||[], r.outgoing||[]);
+  frData = { me:r.me||'', friends:r.friends||[], incoming:r.incoming||[], outgoing:r.outgoing||[],
+             invites:r.invites||[], blocked:r.blocked||[], counts:r.counts||{} };
+  _notify(frData);
+  renderSocial();
 }
-function renderFriends(friends, incoming, outgoing){
-  const online = friends.filter(f=>f.state && f.state!=='offline').length;
-  $('frCount').textContent = friends.length ? `${online}/${friends.length} online` : '';
-  const reqs = $('frReqs'); reqs.innerHTML='';
-  for(const f of incoming){
-    const row=document.createElement('div'); row.className='fr-req';
-    row.innerHTML='<span class="tag">adds you</span><span class="nm"></span>'
-      +'<button class="yes" title="Accept">&#10003;</button><button class="no" title="Decline">&#10005;</button>';
-    row.querySelector('.nm').textContent=f.name;
-    row.querySelector('.yes').onclick=()=>respondFriend(f.name,true);
-    row.querySelector('.no').onclick=()=>respondFriend(f.name,false);
-    reqs.appendChild(row);
+function setTab(t){ frTab=t; closeMenus();
+  document.querySelectorAll('#frTabs button').forEach(b=>b.classList.toggle('on', b.dataset.tab===t));
+  $('frSearch').hidden = (t!=='friends') || frData.friends.length<6;
+  renderSocial();
+}
+function renderSocial(){
+  const c=frData.counts||{};
+  $('frCount').textContent = frData.friends.length ? `${c.online||0}/${frData.friends.length} online` : '';
+  const badge=$('frReqBadge'); const nreq=(frData.incoming||[]).length;
+  badge.textContent=nreq; badge.hidden=!nreq;
+  renderInvites();
+  if(frTab==='friends') renderFriendsTab();
+  else if(frTab==='requests') renderRequestsTab();
+  else renderBlockedTab();
+}
+
+// game invites — a prominent strip above whichever tab is open
+function renderInvites(){
+  const host=$('frInvites'); host.innerHTML='';
+  for(const iv of (frData.invites||[])){
+    const el=document.createElement('div'); el.className='fr-invite';
+    el.innerHTML = avatarHTML(iv.from) +
+      `<div class="meta"><b></b><small>invites you · ${iv.size||2}-player</small></div>`+
+      `<button class="ok" title="Accept">Join</button><button class="no" title="Decline">✕</button>`;
+    el.querySelector('b').textContent=iv.from;
+    el.querySelector('.ok').onclick=()=>acceptInvite(iv);
+    el.querySelector('.no').onclick=()=>declineInvite(iv);
+    host.appendChild(el);
   }
-  for(const f of outgoing){
-    const row=document.createElement('div'); row.className='fr-req';
-    row.innerHTML='<span class="nm"></span><span class="tag">pending</span>';
-    row.querySelector('.nm').textContent=f.name;
-    reqs.appendChild(row);
+}
+
+function matches(f){ if(!frSearch) return true;
+  const q=frSearch.toLowerCase(); return f.name.toLowerCase().includes(q) || (f.nickname||'').toLowerCase().includes(q); }
+
+const GROUPS = [
+  ['fav','Favorites', f=>f.favorite],
+  ['in-game','In a match', f=>!f.favorite && f.state==='in-game'],
+  ['online','Online', f=>!f.favorite && f.state==='online'],
+  ['away','Away', f=>!f.favorite && f.state==='away'],
+  ['offline','Offline', f=>!f.favorite && f.state==='offline'],
+];
+function renderFriendsTab(){
+  const list=$('frList'); list.innerHTML='';
+  const all=(frData.friends||[]).filter(matches);
+  if(!all.length){
+    list.innerHTML = frData.friends.length
+      ? '<div class="fr-empty">No friends match your search.</div>'
+      : '<div class="fr-empty">No friends yet — hit <b>+ Add</b> to find someone by name.</div>';
+    return;
   }
-  reqs.hidden = !(incoming.length || outgoing.length);
-  const list = $('frList'); list.innerHTML='';
-  if(!friends.length){ list.innerHTML='<div class="fr-empty">No friends yet — add someone by name.</div>'; return; }
-  for(const f of friends){
-    const st = f.state || 'offline';
-    const row=document.createElement('div'); row.className='fr-row '+st;
-    row.innerHTML='<span class="dot"></span><span class="nm"></span><span class="st"></span><button class="x" title="Remove">&#10005;</button>';
+  for(const [key,label,pred] of GROUPS){
+    const grp=all.filter(pred); if(!grp.length) continue;
+    const head=document.createElement('div'); head.className='fr-grp';
+    head.innerHTML=`<span>${label}</span><i>${grp.length}</i>`; list.appendChild(head);
+    for(const f of grp) list.appendChild(friendRow(f));
+  }
+}
+function friendRow(f){
+  const row=document.createElement('div'); row.className='fr-row '+(f.state||'offline');
+  row.innerHTML =
+    avatarHTML(f.name) +
+    `<span class="dot" title="${STATE_WORD[f.state]||'Offline'}"></span>`+
+    `<div class="meta"><b class="nm"></b><span class="st"></span></div>`+
+    `<div class="acts">`+
+      `<button class="fr-act inv" title="Invite to a match">⚔</button>`+
+      `<button class="fr-act more" title="More">⋯</button>`+
+    `</div>`+
+    (f.favorite?'<span class="favstar" title="Favorite">★</span>':'');
+  row.querySelector('.nm').textContent = dispName(f);
+  if(f.nickname){ const b=document.createElement('small'); b.className='real'; b.textContent='('+f.name+')'; row.querySelector('.nm').appendChild(b); }
+  row.querySelector('.st').textContent = statusText(f);
+  row.querySelector('.inv').onclick = e=>{ e.stopPropagation(); inviteFriend(f); };
+  row.querySelector('.more').onclick = e=>{ e.stopPropagation(); openMenu(f, e.currentTarget); };
+  row.onclick = ()=>openProfile(f);
+  row.oncontextmenu = e=>{ e.preventDefault(); openMenu(f, row); };
+  return row;
+}
+
+function renderRequestsTab(){
+  const list=$('frList'); list.innerHTML='';
+  const inc=frData.incoming||[], out=frData.outgoing||[];
+  if(!inc.length && !out.length){ list.innerHTML='<div class="fr-empty">No pending requests.</div>'; return; }
+  if(inc.length){
+    const h=document.createElement('div'); h.className='fr-grp'; h.innerHTML=`<span>Wants to be friends</span><i>${inc.length}</i>`; list.appendChild(h);
+    for(const f of inc){
+      const row=document.createElement('div'); row.className='fr-req';
+      row.innerHTML = avatarHTML(f.name) + '<span class="nm"></span>'+
+        '<button class="yes" title="Accept">✓</button><button class="no" title="Decline">✕</button>';
+      row.querySelector('.nm').textContent=f.name;
+      row.querySelector('.yes').onclick=()=>respondFriend(f.name,true);
+      row.querySelector('.no').onclick=()=>respondFriend(f.name,false);
+      list.appendChild(row);
+    }
+  }
+  if(out.length){
+    const h=document.createElement('div'); h.className='fr-grp'; h.innerHTML=`<span>Sent</span><i>${out.length}</i>`; list.appendChild(h);
+    for(const f of out){
+      const row=document.createElement('div'); row.className='fr-req out';
+      row.innerHTML = avatarHTML(f.name) + '<span class="nm"></span><span class="tag">pending</span>'+
+        '<button class="no" title="Cancel">✕</button>';
+      row.querySelector('.nm').textContent=f.name;
+      row.querySelector('.no').onclick=()=>cancelRequest(f.name);
+      list.appendChild(row);
+    }
+  }
+}
+
+function renderBlockedTab(){
+  const list=$('frList'); list.innerHTML='';
+  const bl=frData.blocked||[];
+  if(!bl.length){ list.innerHTML='<div class="fr-empty">You haven’t blocked anyone.</div>'; return; }
+  for(const f of bl){
+    const row=document.createElement('div'); row.className='fr-req blocked';
+    row.innerHTML = avatarHTML(f.name) + '<span class="nm"></span><button class="unb">Unblock</button>';
     row.querySelector('.nm').textContent=f.name;
-    row.querySelector('.st').textContent = st==='in-game' ? 'in a match' : st;
-    row.querySelector('.x').onclick=()=>removeFriend(f.name);
+    row.querySelector('.unb').onclick=()=>unblock(f.name);
     list.appendChild(row);
   }
 }
+
+// ── floating layers: context menu + profile popover (built once, appended to body) ──
+let _menu=null, _profile=null;
+function _ensureLayers(){
+  if(_menu) return;
+  _menu=document.createElement('div'); _menu.className='fr-menu'; _menu.hidden=true; document.body.appendChild(_menu);
+  _profile=document.createElement('div'); _profile.className='fr-profile'; _profile.hidden=true; document.body.appendChild(_profile);
+  document.addEventListener('click', e=>{ if(_menu && !_menu.contains(e.target)) _menu.hidden=true;
+    if(_profile && !_profile.contains(e.target) && !e.target.closest('.fr-row')) _profile.hidden=true; });
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeMenus(); });
+}
+function closeMenus(){ if(_menu) _menu.hidden=true; if(_profile) _profile.hidden=true; }
+function _place(el, anchor){
+  el.hidden=false;
+  const r=anchor.getBoundingClientRect(), w=el.offsetWidth, h=el.offsetHeight;
+  let x=Math.min(r.left, window.innerWidth-w-8);
+  let y=r.bottom+6; if(y+h>window.innerHeight-8) y=Math.max(8, r.top-h-6);
+  el.style.left=Math.max(8,x)+'px'; el.style.top=y+'px';
+}
+function openMenu(f, anchor){
+  _ensureLayers(); _profile.hidden=true;
+  const items=[
+    ['⚔','Invite to a match', ()=>inviteFriend(f)],
+    [f.favorite?'★':'☆', f.favorite?'Remove favorite':'Add favorite', ()=>toggleFav(f)],
+    ['✎','Set nickname', ()=>openNickname(f)],
+    ['👤','View profile', ()=>openProfile(f)],
+    ['—',null,null],
+    ['✕','Remove friend', ()=>removeFriend(f.name), 'danger'],
+    ['⊘','Block', ()=>blockFriend(f.name), 'danger'],
+  ];
+  _menu.innerHTML='';
+  for(const [ic,label,fn,cls] of items){
+    if(label===null){ const sep=document.createElement('div'); sep.className='sep'; _menu.appendChild(sep); continue; }
+    const b=document.createElement('button'); if(cls) b.className=cls;
+    b.innerHTML=`<i>${ic}</i><span></span>`; b.querySelector('span').textContent=label;
+    b.onclick=()=>{ _menu.hidden=true; fn(); }; _menu.appendChild(b);
+  }
+  _place(_menu, anchor);
+}
+function openProfile(f){
+  _ensureLayers(); _menu.hidden=true;
+  const p=_profile;
+  p.innerHTML =
+    `<div class="ph">${avatarHTML(f.name,true)}<div class="pid"><b></b><span class="pstate ${f.state}"></span></div></div>`+
+    `<div class="prows"></div>`+
+    `<div class="pacts">`+
+      `<button class="pa inv">⚔ Invite</button>`+
+      `<button class="pa fav">${f.favorite?'★ Favorited':'☆ Favorite'}</button>`+
+      `<button class="pa nick">✎ Nickname</button>`+
+    `</div>`+
+    `<div class="pacts2"><button class="pa rem">Remove</button><button class="pa blk">Block</button></div>`;
+  p.querySelector('.pid b').textContent = dispName(f) + (f.nickname?` (${f.name})`:'');
+  const ps=p.querySelector('.pstate'); ps.textContent=statusText(f);
+  const rows=p.querySelector('.prows'); rows.innerHTML='';
+  const addr=(k,v)=>{ const d=document.createElement('div'); d.className='prow'; d.innerHTML=`<span>${k}</span><b></b>`; d.querySelector('b').textContent=v; rows.appendChild(d); };
+  addr('Status', STATE_WORD[f.state]||'Offline');
+  if(f.last_seen) addr('Last seen', relTime(f.last_seen));
+  if(f.since) addr('Friends since', new Date(Number(f.since)*1000).toLocaleDateString());
+  p.querySelector('.inv').onclick=()=>{ closeMenus(); inviteFriend(f); };
+  p.querySelector('.fav').onclick=()=>{ toggleFav(f); };
+  p.querySelector('.nick').onclick=()=>{ openNickname(f); };
+  p.querySelector('.rem').onclick=()=>{ closeMenus(); removeFriend(f.name); };
+  p.querySelector('.blk').onclick=()=>{ closeMenus(); blockFriend(f.name); };
+  // center it within the friends panel
+  const host=$('friends').getBoundingClientRect();
+  p.hidden=false;
+  p.style.left=Math.max(8, host.left+(host.width-p.offsetWidth)/2)+'px';
+  p.style.top=Math.max(8, host.top+40)+'px';
+}
+function openNickname(f){
+  _ensureLayers();
+  const cur=f.nickname||'';
+  _menu.innerHTML=`<div class="nick-edit"><input maxlength="24" placeholder="nickname" value=""><button>Save</button></div>`;
+  const inp=_menu.querySelector('input'); inp.value=cur;
+  const save=()=>{ _menu.hidden=true; setNickname(f.name, inp.value.trim()); };
+  _menu.querySelector('button').onclick=save;
+  inp.onkeydown=e=>{ if(e.key==='Enter') save(); else if(e.key==='Escape') _menu.hidden=true; };
+  const host=$('friends').getBoundingClientRect(); _menu.hidden=false;
+  _menu.style.left=Math.max(8, host.left+20)+'px'; _menu.style.top=(host.top+80)+'px';
+  setTimeout(()=>inp.focus(), 0);
+}
+
+// ── actions ──
 async function addFriend(){
-  const name=$('frAddName').value.trim(); if(!name || !_tok()) return;
-  const r=await invoke('friend_request',{ host:SAVE.settings.server, token:_tok(), to:name }).catch(()=>null);
-  if(r && r.ok){ $('frAddName').value=''; $('frAdd').hidden=true; toast('Friend request sent to '+name,'ok'); loadFriends(); }
+  const name=$('frAddName').value.trim(); if(!name) return;
+  const r=await sx('friend_request',{ to:name });
+  if(r && r.ok){ $('frAddName').value=''; toast(r.accepted? (name+' is now your friend') : ('Friend request sent to '+name),'ok'); loadFriends(); loadRecent(); }
   else toast((r && r.error) || 'Could not send request.','err');
 }
 async function respondFriend(from, accept){
-  const r=await invoke('friend_respond',{ host:SAVE.settings.server, token:_tok(), from, accept }).catch(()=>null);
-  if(r && r.ok) loadFriends(); else toast((r && r.error) || 'Failed.','err');
+  const r=await sx('friend_respond',{ from, accept });
+  if(r && r.ok){ toast(accept?(from+' is now your friend'):'Request declined', accept?'ok':'ok'); loadFriends(); }
+  else toast((r && r.error) || 'Failed.','err');
 }
-async function removeFriend(who){
-  const r=await invoke('friend_remove',{ host:SAVE.settings.server, token:_tok(), who }).catch(()=>null);
-  if(r && r.ok) loadFriends();
+async function cancelRequest(to){ const r=await sx('friend_cancel',{ to }); if(r && r.ok) loadFriends(); else toast((r&&r.error)||'Failed.','err'); }
+async function removeFriend(who){ const r=await sx('friend_remove',{ who }); if(r && r.ok){ closeMenus(); toast('Removed '+who,'ok'); loadFriends(); } }
+async function blockFriend(who){ const r=await sx('friend_block',{ who }); if(r && r.ok){ closeMenus(); toast('Blocked '+who,'ok'); loadFriends(); } else toast((r&&r.error)||'Failed.','err'); }
+async function unblock(who){ const r=await sx('friend_unblock',{ who }); if(r && r.ok){ toast('Unblocked '+who,'ok'); loadFriends(); } }
+async function toggleFav(f){ const on=!f.favorite; const r=await sx('friend_favorite',{ who:f.name, on });
+  if(r && r.ok){ f.favorite=on; loadFriends(); } }
+async function setNickname(who, nickname){ const r=await sx('friend_nickname',{ who, nickname });
+  if(r && r.ok){ toast(nickname?('Nickname set'):'Nickname cleared','ok'); loadFriends(); } }
+
+// invites: send uses the Match-tab room/size (or the server mints a private room)
+async function inviteFriend(f){
+  closeMenus();
+  const room=(SAVE.settings.room||'').trim(), size=SAVE.settings.queue||2;
+  const r=await sx('invite_send',{ to:f.name, room, size });
+  if(r && r.ok) toast('Invited '+f.name+' to a match','ok');
+  else toast((r && r.error) || 'Could not invite.','err');
 }
-$('frAddToggle').addEventListener('click', ()=>{ const a=$('frAdd'); a.hidden=!a.hidden; if(!a.hidden) $('frAddName').focus(); });
+async function acceptInvite(iv){
+  const r=await sx('invite_respond',{ from:iv.from, accept:true });
+  if(r && r.ok && r.room_code){ toast('Joining '+iv.from+'’s match…','ok'); play(r.room_code, r.size||iv.size||2); }
+  else toast((r && r.error) || 'That invite expired.','err');
+  loadFriends();
+}
+async function declineInvite(iv){ await sx('invite_respond',{ from:iv.from, accept:false }); loadFriends(); }
+
+// recent co-players → quick-add chips in the Add panel
+async function loadRecent(){
+  const r=await sx('friends_recent'); frRecent=(r && r.ok && r.recent)||[];
+  const host=$('frRecent'); host.innerHTML='';
+  if(!frRecent.length) return;
+  const lbl=document.createElement('div'); lbl.className='fr-recent-lbl'; lbl.textContent='Recently played with'; host.appendChild(lbl);
+  for(const p of frRecent.slice(0,8)){
+    const chip=document.createElement('button'); chip.className='fr-chip';
+    chip.innerHTML=avatarHTML(p.name)+'<span></span>'; chip.querySelector('span').textContent=p.name;
+    chip.onclick=async ()=>{ const r=await sx('friend_request',{ to:p.name }); if(r&&r.ok){ toast('Friend request sent to '+p.name,'ok'); loadFriends(); loadRecent(); } };
+    host.appendChild(chip);
+  }
+}
+
+// ── wiring ──
+$('frTabs').addEventListener('click', e=>{ const b=e.target.closest('button'); if(b) setTab(b.dataset.tab); });
+$('frSearch').addEventListener('input', e=>{ frSearch=e.target.value; renderFriendsTab(); });
+$('frAddToggle').addEventListener('click', ()=>{ const a=$('frAdd'); a.hidden=!a.hidden; if(!a.hidden){ $('frAddName').focus(); loadRecent(); } });
 $('frAddBtn').addEventListener('click', addFriend);
 $('frAddName').addEventListener('keydown', e=>{ if(e.key==='Enter') addFriend(); else if(e.key==='Escape') $('frAdd').hidden=true; });
 setInterval(()=>{ if(!document.hidden && !$('view-home').hidden) loadFriends(); }, 20000);
@@ -726,3 +996,23 @@ startParticles();
 updateCTA();   // Home → the bottom button reads "MATCH"
 refresh().then(()=>{ pollStatus(); checkForUpdates(false); checkLauncherUpdate(); loadBoard(); });
 setInterval(pollStatus, 12000);
+
+// ── preview/demo harness (browser only, no Tauri) ────────────────────────────
+// Drives the social panel into a named state for screenshots / design preview:
+//   index.html?demo=friends | requests | blocked | menu | profile | add | invite
+// Never runs in the real launcher (HAS_TAURI gates it). Uses the rich FALLBACK bundle.
+if(!HAS_TAURI && /[?&]demo/.test(location.search)){
+  const state = new URLSearchParams(location.search).get('demo') || 'friends';
+  SAVE.session = { name:'Aang', server:DEFAULT_SERVER, token:'demo' };
+  showChip('Aang'); loginEl.classList.add('hide'); loginEl.style.display='none';
+  const _cw=$('cloneWizard'); if(_cw) _cw.style.display='none';
+  setView('home');
+  loadFriends().then(()=>{
+    if(state==='requests') setTab('requests');
+    else if(state==='blocked') setTab('blocked');
+    else if(state==='add'){ $('frAdd').hidden=false; loadRecent(); }
+    else if(state==='menu'){ const m=document.querySelector('.fr-row .more'); if(m) m.click(); }
+    else if(state==='profile'){ const f=(frData.friends.find(x=>!x.favorite&&x.state!=='offline')||frData.friends[0]); if(f) openProfile(f); }
+    else if(state==='invite'){ toast('BoulderKing invited you to a match','ok'); }
+  });
+}

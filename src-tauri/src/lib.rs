@@ -1238,6 +1238,66 @@ async fn friend_remove(host: String, token: String, who: String) -> serde_json::
     ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
 }
 
+// ── social v2: cancel/block/favorite/nickname/invites/recent ───────────────────
+#[tauri::command]
+async fn friend_cancel(host: String, token: String, to: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/friends/cancel", Some(&token), serde_json::json!({"to": to}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn friend_block(host: String, token: String, who: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/friends/block", Some(&token), serde_json::json!({"who": who}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn friend_unblock(host: String, token: String, who: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/friends/unblock", Some(&token), serde_json::json!({"who": who}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn friend_favorite(host: String, token: String, who: String, on: bool) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/friends/favorite", Some(&token), serde_json::json!({"who": who, "on": on}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn friend_nickname(host: String, token: String, who: String, nickname: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/friends/nickname", Some(&token),
+                serde_json::json!({"who": who, "nickname": nickname}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn invite_send(host: String, token: String, to: String, room: String, size: u32) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/invites/send", Some(&token),
+                serde_json::json!({"to": to, "room_code": room, "size": size}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn invite_respond(host: String, token: String, from: String, accept: bool) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/invites/respond", Some(&token),
+                serde_json::json!({"from": from, "accept": accept}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn friends_recent(host: String, token: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "GET", "/friends/recent", Some(&token), serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // WebKitGTK on Linux renders a grey/blank window when its DMABUF renderer can't
@@ -1280,7 +1340,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, invite_send, invite_respond, friends_recent])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
