@@ -54,6 +54,15 @@
         <div class="kicker">Avatar &middot; Legends of the Arena</div>
         <h1>Master the<br><span>Four Elements</span></h1>
         <div class="sub">The 2008 Nickelodeon arena brawler, revived. Queue up, bend, and fight to be the last legend standing.</div>
+        <div class="news" id="news" hidden>
+          <div class="news-h"><span>What&rsquo;s New</span></div>
+          <div class="news-list" id="newsList"></div>
+        </div>
+        <div class="community" id="community">
+          <button class="cbtn" id="cbHow">&#9654; How to play</button>
+          <button class="cbtn" id="cbDiscord" hidden>&#128172; Discord</button>
+          <button class="cbtn" id="cbSite" hidden>&#127760; Website</button>
+        </div>
       </div>
       <div class="fr" id="friends">
         <div class="fr-head"><span class="fr-title">Friends</span>
@@ -183,6 +192,22 @@
       <small>On PLAY, logs you into the game automatically with your launcher account &mdash; no typing your password again. You still pick your match and queue yourself.</small></div>
       <div class="tg" id="stSkip"></div></div>
 
+    <div class="sec" id="acctSec" hidden>Account</div>
+    <div class="acctbox" id="acctBox" hidden>
+      <div class="field"><label>Change password</label>
+        <input id="apCur" type="password" placeholder="current password" autocomplete="current-password">
+        <input id="apNew" type="password" placeholder="new password" autocomplete="new-password"></div>
+      <button class="btn ghost" id="apGo">Update password</button>
+      <div class="hint" id="apMsg"></div>
+      <button class="btn ghost" id="apLogoutAll" style="margin-top:12px">Sign out everywhere</button>
+      <button class="btn ghost danger" id="apDelete" style="margin-top:10px">Delete account&hellip;</button>
+      <div class="apdel" id="apDel" hidden>
+        <div class="field" style="margin-top:12px"><label>This is permanent. Type your password to confirm.</label>
+          <input id="apDelPw" type="password" placeholder="password"></div>
+        <button class="btn danger" id="apDelGo">Permanently delete my account</button>
+      </div>
+    </div>
+
     <div class="sec">Display</div>
     <div class="field"><label>Resolution</label>
       <select id="stRes"></select></div>
@@ -216,6 +241,13 @@
         <input id="liPass" type="password" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="current-password"></div>
       <div class="err" id="liErr"></div>
       <button class="btn" id="liGo">SIGN IN &#9658;</button>
+      <div class="lihelp"><a href="#" id="liForgot">Forgot password?</a></div>
+      <div class="fpw" id="fpw" hidden>
+        <div class="field"><label>Email or username</label>
+          <input id="fpwId" placeholder="the email on your account" spellcheck="false"></div>
+        <button class="btn ghost" id="fpwGo">Send reset link</button>
+        <div class="hint" id="fpwMsg"></div>
+      </div>
       <div class="field" style="margin:16px 0 0"><label>Server</label>
         <input id="liServer" placeholder="gw.legends-awakened.com" spellcheck="false"></div>
       <div class="hint">No account? One is created automatically on first sign-in.</div>
@@ -260,6 +292,29 @@
         <button class="modal-btn ghost" id="updateLater" type="button">Later</button>
         <button class="modal-btn primary" id="updateNow" type="button">Update</button>
       </div>
+    </div>
+  </div>
+
+  <!-- how-to-play -->
+  <div id="helpModal" class="modal" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-title">How to play</div>
+      <div class="modal-body">
+        <ol class="help-steps">
+          <li><b>Sign in</b> &mdash; an account is created automatically on first sign-in.</li>
+          <li><b>Pick your bender</b> at character select in-game.</li>
+          <li><b>Queue up</b> &mdash; open Match (or Training vs AI), then hit PLAY.</li>
+          <li><b>Be the last legend standing</b> to win the round.</li>
+        </ol>
+        <div class="help-ctrls">
+          <div class="hc"><span>Move</span><b>WASD / Arrows</b></div>
+          <div class="hc"><span>Aim &amp; camera</span><b>Mouse</b></div>
+          <div class="hc"><span>Jump &middot; arena pads</span><b>Space</b></div>
+          <div class="hc"><span>Bend</span><b>Your 4 skills</b></div>
+        </div>
+        <p class="help-foot">Full guides &amp; the community live on <a href="#" id="helpDiscord">Discord</a>.</p>
+      </div>
+      <div class="modal-actions"><button class="modal-btn primary" id="helpClose" type="button">Got it</button></div>
     </div>
   </div>
 </div>

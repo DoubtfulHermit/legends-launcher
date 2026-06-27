@@ -241,11 +241,13 @@ function _resetNotify(){ _frPrimed=false; _seenInc=new Set(); _seenInv=new Set()
 function _notify(d){
   const inc=(d.incoming||[]).map(f=>f.name), inv=(d.invites||[]).map(i=>i.from);
   if(_frPrimed){
-    for(const n of inc) if(!_seenInc.has(n)) toast(n+' wants to be your friend','ok');
-    for(const n of inv) if(!_seenInv.has(n)) toast(n+' invited you to a match','ok');
+    for(const n of inc) if(!_seenInc.has(n)){ toast(n+' wants to be your friend','ok'); osNotify('Friend request', n+' wants to be your friend'); }
+    for(const n of inv) if(!_seenInv.has(n)){ toast(n+' invited you to a match','ok'); osNotify('Match invite', n+' invited you to a match'); }
   }
   _seenInc=new Set(inc); _seenInv=new Set(inv); _frPrimed=true;
 }
+// OS notification — only when the launcher is unfocused/minimised (don't double-noise on-screen toasts)
+function osNotify(title, body){ if(HAS_TAURI && document.hidden) invoke('os_notify',{ title, body }).catch(()=>{}); }
 
 // ── signed-out / unreachable empty state ──
 function _hideShell(hide){
@@ -566,6 +568,9 @@ function buildResolutions(){
 }
 function syncDrawer(){
   const st=SAVE.settings;
+  const signedIn=!!(SAVE.session && SAVE.session.name);
+  $('acctSec').hidden=!signedIn; $('acctBox').hidden=!signedIn;
+  if(!signedIn){ $('apDel').hidden=true; $('apMsg').textContent=''; }
   $('stServer').value=st.server||'';
   $('stRes').value=st.res;
   $('stFs').classList.toggle('on', !!st.fullscreen);
@@ -687,13 +692,18 @@ function setSvc(name, up){
   el.classList.remove('off','unknown');
   if(up===null) el.classList.add('unknown'); else if(!up) el.classList.add('off');
 }
-let statusDebounce;
+let statusDebounce, _wasReachable=true;
 async function pollStatus(){
   if(document.hidden) return;   // don't poll the network while minimised
   const host=(SAVE.settings.server||'').trim();
   if(!host){ ['gateway','database','game_server'].forEach(n=>setSvc(n,null)); $('players').textContent='—'; return; }
   let r; try{ r=await invoke('status',{ host }); }catch{ r=null; }
-  if(!r || !r.reachable){ ['gateway','database','game_server'].forEach(n=>setSvc(n,false)); $('players').textContent='—'; return; }
+  if(!r || !r.reachable){
+    ['gateway','database','game_server'].forEach(n=>setSvc(n,false)); $('players').textContent='—';
+    if(_wasReachable){ toast('Can’t reach the server — retrying…','err'); _wasReachable=false; }
+    return;
+  }
+  if(!_wasReachable){ toast('Back online.','ok'); _wasReachable=true; }   // recovered
   setSvc('gateway', !!r.gateway); setSvc('database', !!r.database); setSvc('game_server', !!r.game_server);
   $('players').textContent = r.game_server ? String(r.players) : '—';
 }
@@ -1125,10 +1135,16 @@ function _rvSetup(el, data){
 
 // ── parties — group block in the friends panel, polled separately ──
 let partyData=null, _partyTimer=null, _lastGo=0;
+let _lastPartyInv=null;
 async function pollParty(){
   if(!_tok()){ renderParty(null,null); return; }
   let r; try{ r=await invoke('party_get',{ host:_srv(), token:_tok() }); }catch{ return; }
   if(!r || !r.ok) return;
+  // notify on a NEW incoming party invite
+  const invId=r.invite ? (r.invite.party_id+':'+r.invite.from) : null;
+  if(invId && invId!==_lastPartyInv && _frPrimed){ toast(r.invite.from+' invited you to their party','ok');
+    osNotify('Party invite', r.invite.from+' invited you to their party'); }
+  _lastPartyInv=invId;
   partyData=r.party; renderParty(r.party, r.invite);
   if(r.party && r.party.status==='go' && r.party.go_at>_lastGo){
     _lastGo=r.party.go_at; toast('Party starting — queuing you in…','ok'); play(r.party.room_code, r.party.size);
@@ -1211,26 +1227,106 @@ if(!HAS_TAURI){
                        {t:14,kind:'hit',actor:'Aang',target:'Korra',value:45}] };
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+//  Pre-launch: account self-service (#1) · news + community (#4)
+// ════════════════════════════════════════════════════════════════════════════
+function _lserver(){ return ($('liServer').value.trim()) || SAVE.settings.server; }
+
+// ── forgot password (login screen) ──
+$('liForgot').addEventListener('click', e=>{ e.preventDefault(); const f=$('fpw'); f.hidden=!f.hidden;
+  if(!f.hidden){ $('fpwId').value=$('liUser').value.trim(); $('fpwId').focus(); $('fpwMsg').textContent=''; } });
+$('fpwGo').addEventListener('click', async ()=>{
+  const ident=$('fpwId').value.trim(); const msg=$('fpwMsg');
+  if(!ident){ msg.textContent='Enter your email or username.'; return; }
+  const b=$('fpwGo'); b.disabled=true;
+  try{ await invoke('account_forgot',{ host:_lserver(), ident }); }catch{}
+  msg.textContent='If an account with an email on file exists, a reset link is on its way — check your inbox.';
+  b.disabled=false;
+});
+$('fpwId').addEventListener('keydown', e=>{ if(e.key==='Enter') $('fpwGo').click(); });
+
+// ── account panel (settings drawer) ──
+$('apGo').addEventListener('click', async ()=>{
+  const cur=$('apCur').value, neu=$('apNew').value, msg=$('apMsg');
+  if(!cur||!neu){ msg.textContent='Fill in both fields.'; return; }
+  const r=await invoke('account_change_password',{ host:SAVE.settings.server, name:SAVE.session.name, current:cur, new:neu }).catch(()=>null);
+  if(r && r.ok){ msg.textContent='Password updated.'; $('apCur').value=''; $('apNew').value=''; sessionPass=neu; toast('Password updated.','ok'); }
+  else msg.textContent=(r && r.error)||'Could not update password.';
+});
+$('apLogoutAll').addEventListener('click', async ()=>{
+  const r=await invoke('session_logout_all',{ host:SAVE.settings.server, token:_tok() }).catch(()=>null);
+  toast(r && r.ok ? 'Signed out on every device.' : 'Signed out.','ok'); closeDrawer(); signOut();
+});
+$('apDelete').addEventListener('click', ()=>{ const d=$('apDel'); d.hidden=!d.hidden; if(!d.hidden) $('apDelPw').focus(); });
+$('apDelGo').addEventListener('click', async ()=>{
+  const pw=$('apDelPw').value; if(!pw){ return; }
+  const r=await invoke('account_delete',{ host:SAVE.settings.server, name:SAVE.session.name, password:pw }).catch(()=>null);
+  if(r && r.ok){ toast('Your account has been deleted.','ok'); closeDrawer(); signOut(); }
+  else toast((r && r.error)||'Could not delete account — check your password.','err');
+});
+
+// ── news + community + how-to-play ──
+let _links={};
+function openUrl(u){ if(u) invoke('open_url',{ url:u }).catch(()=>{}); }
+async function loadNews(){
+  let r; try{ r=await invoke('news',{ host:SAVE.settings.server }); }catch{ r=null; }
+  if(!r || !r.ok) return;
+  const items=r.items||[]; _links=r.links||{};
+  const host=$('newsList');
+  if(items.length){ host.innerHTML='';
+    for(const it of items.slice(0,3)){
+      const el=document.createElement('div'); el.className='news-item';
+      el.innerHTML='<b></b><p></p>'; el.querySelector('b').textContent=it.title||''; el.querySelector('p').textContent=it.body||'';
+      host.appendChild(el);
+    }
+    $('news').hidden=false;
+  }
+  $('cbDiscord').hidden=!_links.discord; $('cbSite').hidden=!_links.site;
+}
+$('cbDiscord').addEventListener('click', ()=>openUrl(_links.discord));
+$('cbSite').addEventListener('click', ()=>openUrl(_links.site));
+$('cbHow').addEventListener('click', ()=>$('helpModal').setAttribute('aria-hidden','false'));
+$('helpClose').addEventListener('click', ()=>$('helpModal').setAttribute('aria-hidden','true'));
+$('helpModal').addEventListener('click', e=>{ if(e.target===$('helpModal')) $('helpModal').setAttribute('aria-hidden','true'); });
+$('helpDiscord').addEventListener('click', e=>{ e.preventDefault(); openUrl(_links.discord); });
+
+// preview-only mock data for the pre-launch features (must be set BEFORE loadNews runs)
+if(!HAS_TAURI){
+  FALLBACK.account_forgot={ok:true}; FALLBACK.account_change_password={ok:true};
+  FALLBACK.account_delete={ok:true}; FALLBACK.session_logout_all={ok:true,revoked:2}; FALLBACK.os_notify=null;
+  FALLBACK.news={ ok:true, links:{ discord:'https://discord.gg/hK9ZkNS8Sp', site:'https://www.legends-awakened.com',
+      support:'https://www.legends-awakened.com' }, items:[
+    {date:'', title:'Welcome to Legends Awakened', body:'The 2008 Avatar arena brawler is back online — sign in, pick your bender, and queue up.'},
+    {date:'', title:'Friends, parties & replays', body:'Group up with friends, invite them to a match, and watch your games back in 2D.'} ] };
+}
+loadNews();
+
 // ── preview/demo harness (browser only, no Tauri) ────────────────────────────
 // Drives the social panel into a named state for screenshots / design preview:
 //   index.html?demo=friends | requests | blocked | menu | profile | add | invite
 // Never runs in the real launcher (HAS_TAURI gates it). Uses the rich FALLBACK bundle.
 if(!HAS_TAURI && /[?&]demo/.test(location.search)){
   const state = new URLSearchParams(location.search).get('demo') || 'friends';
-  SAVE.session = { name:'Aang', server:DEFAULT_SERVER, token:'demo' };
-  showChip('Aang'); loginEl.classList.add('hide'); loginEl.style.display='none';
   const _cw=$('cloneWizard'); if(_cw) _cw.style.display='none';
-  setView('home');
-  loadFriends().then(()=>{
-    if(state==='requests') setTab('requests');
-    else if(state==='blocked') setTab('blocked');
-    else if(state==='add'){ $('frAdd').hidden=false; loadRecent(); }
-    else if(state==='menu'){ const m=document.querySelector('.fr-row .more'); if(m) m.click(); }
-    else if(state==='profile'){ const f=(frData.friends.find(x=>!x.favorite&&x.state!=='offline')||frData.friends[0]); if(f) openProfile(f); }
-    else if(state==='invite'){ toast('BoulderKing invited you to a match','ok'); }
-    else if(state==='career') openMyCareer();
-    else if(state==='replay') openReplay('demo');
-    else if(state==='party') pollParty();
-    else if(state==='leaderboard') setView('ranks');
-  });
+  if(state==='forgot'){                          // pre-login feature → keep the login card visible
+    $('liUser').value='Aang'; $('liForgot').click();
+  } else {
+    SAVE.session = { name:'Aang', server:DEFAULT_SERVER, token:'demo' };
+    showChip('Aang'); loginEl.classList.add('hide'); loginEl.style.display='none';
+    setView('home');
+    loadFriends().then(()=>{
+      if(state==='requests') setTab('requests');
+      else if(state==='blocked') setTab('blocked');
+      else if(state==='add'){ $('frAdd').hidden=false; loadRecent(); }
+      else if(state==='menu'){ const m=document.querySelector('.fr-row .more'); if(m) m.click(); }
+      else if(state==='profile'){ const f=(frData.friends.find(x=>!x.favorite&&x.state!=='offline')||frData.friends[0]); if(f) openProfile(f); }
+      else if(state==='invite'){ toast('BoulderKing invited you to a match','ok'); }
+      else if(state==='career') openMyCareer();
+      else if(state==='replay') openReplay('demo');
+      else if(state==='party') pollParty();
+      else if(state==='leaderboard') setView('ranks');
+      else if(state==='help') $('cbHow').click();
+      else if(state==='account') openDrawer();
+    });
+  }
 }

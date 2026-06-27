@@ -1216,6 +1216,41 @@ async fn friends_list(host: String, token: String) -> serde_json::Value {
     ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
 }
 
+// ── account self-service: forgot / change password / sign-out-all / delete ────
+#[tauri::command]
+async fn account_forgot(host: String, ident: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/account/forgot", None, serde_json::json!({"name": ident}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn account_change_password(host: String, name: String, current: String, new: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/account/change-password", None,
+                serde_json::json!({"name": name, "current_password": current, "new_password": new}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn account_delete(host: String, name: String, password: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/account/delete", None,
+                serde_json::json!({"name": name, "password": password}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn session_logout_all(host: String, token: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/session/logout-all", Some(&token), serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+// ── desktop notification — fired from JS for friend requests / invites when unfocused ──
+#[tauri::command]
+fn os_notify(app: tauri::AppHandle, title: String, body: String) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app.notification().builder().title(title).body(body).show();
+}
+
 #[tauri::command]
 async fn friend_request(host: String, token: String, to: String) -> serde_json::Value {
     tauri::async_runtime::spawn_blocking(move ||
@@ -1416,6 +1451,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         // The remade menus load the game's real textures straight from the install
         // (game/Textures), so the webview can `convertFileSrc()` them. The install dir
@@ -1427,7 +1463,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, invite_send, invite_respond, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, invite_send, invite_respond, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start, account_forgot, account_change_password, account_delete, session_logout_all, os_notify])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

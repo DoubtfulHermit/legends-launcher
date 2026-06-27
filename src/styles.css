@@ -542,3 +542,43 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
 .party-acts .pa.rdy.on{border-color:transparent;background:rgba(82,224,138,.22);color:var(--good)}
 .party-acts .pa.go{background:linear-gradient(180deg,var(--ember),var(--ember2));border-color:transparent;color:#fff}
 .fr-invite.party{background:rgba(255,170,90,.13);border-color:rgba(var(--ember-rgb),.4)}
+
+/* ── pre-launch: forgot-password, account panel, news/community, how-to-play ── */
+/* forgot-password (login card) */
+.lihelp{text-align:center;margin-top:12px}
+.lihelp a{color:var(--gold);font-size:12px;text-decoration:none;opacity:.85}
+.lihelp a:hover{opacity:1;text-decoration:underline}
+.fpw{margin-top:14px;padding-top:14px;border-top:1px solid var(--bd)}
+.fpw .hint{margin-top:10px;min-height:14px}
+
+/* account panel (settings drawer) */
+.acctbox{display:flex;flex-direction:column}
+.acctbox .field input{margin-bottom:0}
+.acctbox .hint{color:var(--mut);font-size:11px;min-height:14px;margin-top:8px}
+.btn.danger{background:linear-gradient(180deg,#c0392b,#a02a1e);box-shadow:0 8px 22px rgba(192,57,43,.35)}
+.btn.ghost.danger{background:rgba(192,57,43,.12);border-color:rgba(192,57,43,.4);color:#ff9b8f;box-shadow:none}
+.btn.ghost.danger:hover{background:rgba(192,57,43,.22)}
+.apdel{margin-top:4px}
+
+/* news + community (Home hero column) */
+.news{margin-top:22px;max-width:440px;background:rgba(14,10,18,.55);border:1px solid var(--bd);border-radius:12px;
+  padding:12px 14px;backdrop-filter:blur(2px)}
+.news-h span{font-family:Cinzel,serif;font-weight:700;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold)}
+.news-list{display:flex;flex-direction:column;gap:9px;margin-top:9px}
+.news-item b{display:block;font-size:13px;font-weight:700;color:var(--bone)}
+.news-item p{font-size:11.5px;color:var(--mut);line-height:1.5;margin-top:2px}
+.community{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.cbtn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;border-radius:999px;
+  border:1px solid var(--bd);background:rgba(10,8,14,.45);color:var(--bone);font:inherit;font-size:12px;font-weight:700;cursor:pointer;
+  transition:border-color .15s,transform .12s}
+.cbtn:hover{border-color:rgba(var(--ember-rgb),.6);transform:translateY(-1px)}
+
+/* how-to-play modal extras */
+.help-steps{margin:0 0 16px;padding-left:20px;display:flex;flex-direction:column;gap:7px}
+.help-steps li{font-size:13px;color:var(--mut);line-height:1.45}
+.help-steps li b{color:var(--bone)}
+.help-ctrls{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+.help-ctrls .hc{display:flex;justify-content:space-between;gap:8px;padding:8px 11px;border:1px solid var(--bd);
+  border-radius:9px;background:rgba(8,6,12,.5);font-size:12px}
+.help-ctrls .hc span{color:var(--smoke)} .help-ctrls .hc b{color:var(--bone)}
+.help-foot{font-size:12px;color:var(--mut)} .help-foot a{color:var(--gold);text-decoration:none} .help-foot a:hover{text-decoration:underline}
