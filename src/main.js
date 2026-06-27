@@ -720,7 +720,8 @@ function gather(){
 // PLAY morphs into a status pill (#prog) — reused for the experimental Skip-menus orchestration.
 function showProg(text, pct){ $('play').style.display='none'; $('prog').style.display='block';
   $('progText').textContent=text; $('progFill').style.width=(pct||0)+'%'; $('progPct').textContent = pct!=null?pct+'%':''; }
-function resetPlay(){ $('prog').style.display='none'; $('play').style.display='flex'; $('play').disabled=false; updateCTA(); }
+let _inGame=false;   // true while a launched game is running → PLAY stays disabled (no double-launch)
+function resetPlay(){ _inGame=false; $('prog').style.display='none'; $('play').style.display='flex'; $('play').disabled=false; updateCTA(); }
 
 
 // Arm the seamless ("Skip-menus") launch with a one-time game-login ticket so the game
@@ -770,11 +771,18 @@ async function play(roomOverride, queueOverride){
   // and hands the menu to the player — so you never type the in-game login again. The launcher's job
   // ends at launch; it steps aside (no cover/queue orchestration — the game runs normally).
   $('play').disabled=true; setPlayLabel(ticket ? 'LOGGING IN…' : 'LAUNCHING…');
+  const w=getWin();
   try{
-    await invoke('play',{ settings, windowed:!settings.fullscreen, username, ticket });
+    // invoke('play') now resolves only when the GAME EXITS (the Rust side waits on the child).
+    // So PLAY stays disabled for the whole match (no 2nd instance), and we minimise meanwhile.
+    const launched = invoke('play',{ settings, windowed:!settings.fullscreen, username, ticket });
     toast(ticket ? 'Logging you in…' : 'Launching…','ok');
-    const w=getWin(); setTimeout(()=>{ if(w) w.close(); }, 900);
-  }catch(e){ toast(String(e),'err'); resetPlay(); }
+    _inGame=true; setPlayLabel('IN GAME');
+    setTimeout(()=>{ if(w && _inGame) w.minimize(); }, 1500);   // let the game grab focus, then drop the launcher
+    await launched;                                             // ← the game has now closed
+    if(w){ try{ await w.unminimize(); await w.setFocus(); }catch{} }   // bring the launcher back, ready to go again
+  }catch(e){ toast(String(e),'err'); }
+  resetPlay();   // re-arm PLAY (game exited, or launch failed)
 }
 async function locate(){
   try{ const p=await invoke('locate'); if(p) await refresh(); else toast('That folder has no Config.ini.','err'); }

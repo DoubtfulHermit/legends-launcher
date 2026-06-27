@@ -886,8 +886,10 @@ fn gamescope_available() -> bool {
 // `gamescope`/`gamescope_args` come from the launcher's Display toggle (Linux only).
 // Env vars (AVATAR_GAMESCOPE / AVATAR_GAMESCOPE_ARGS / AVATAR_VK_ICD) still override.
 #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+// Launch the game. Returns the child process when we can track it (so the caller can wait for
+// the game to exit) — or None when it's detached on purpose (gamescope via setsid).
 fn spawn_game(dir: &Path, exe_path: &Path, auto_login: bool, gamescope: bool, gamescope_args: &str,
-              width: u32, height: u32, fullscreen: bool) -> Result<(), String> {
+              width: u32, height: u32, fullscreen: bool) -> Result<Option<std::process::Child>, String> {
     use std::process::Command;
     // Login-only is not skip/queue. Keep the old skip env off for Auto sign-in and use a separate
     // marker so the DLL installs only the login driver + observers, not the queue-era hooks.
@@ -896,11 +898,12 @@ fn spawn_game(dir: &Path, exe_path: &Path, auto_login: bool, gamescope: bool, ga
     write_launch_debug(dir, exe_path, auto_login, skip_env, auto_login_env);
     #[cfg(target_os = "windows")]
     {
-        Command::new(exe_path).current_dir(dir)
+        let child = Command::new(exe_path).current_dir(dir)
             .env("AVATAR_SKIP_MENUS", skip_env)
             .env("AVATAR_AUTO_LOGIN", auto_login_env)
             .spawn()
             .map_err(|e| format!("launch {}: {e}", exe_path.display()))?;
+        Ok(Some(child))
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -967,7 +970,7 @@ fn spawn_game(dir: &Path, exe_path: &Path, auto_login: bool, gamescope: bool, ga
                 cmd.arg(if fullscreen { "-f" } else { "-b" });
                 cmd.arg("--").arg("wine").arg(exe_path);
                 cmd.spawn().map_err(|e| format!("launch via gamescope: {e}"))?;
-                return Ok(());
+                return Ok(None);   // detached via setsid — its exit can't be tracked
             }
         }
 
@@ -976,10 +979,10 @@ fn spawn_game(dir: &Path, exe_path: &Path, auto_login: bool, gamescope: bool, ga
         cmd.env("AVATAR_SKIP_MENUS", skip_env);
         cmd.env("AVATAR_AUTO_LOGIN", auto_login_env);
         if let Some(p) = prefix { cmd.env("WINEPREFIX", p); }
-        cmd.spawn().map_err(|e|
+        let child = cmd.spawn().map_err(|e|
             format!("launch via wine ({}): {e} — is wine installed?", exe_path.display()))?;
+        Ok(Some(child))
     }
-    Ok(())
 }
 
 #[tauri::command]
@@ -1018,7 +1021,12 @@ async fn play(settings: Settings, windowed: bool, username: Option<String>, tick
     // Config.ini (hardcoded 800x600 top-left), so only use it as a last-resort fallback.
     let windowed_exe = dir.join("AvatarMP_Windowed.exe");
     let target = if windowed_exe.is_file() { windowed_exe } else { dir.join("AvatarMP.exe") };
-    spawn_game(&dir, &target, logged_in, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen)
+    let child = spawn_game(&dir, &target, logged_in, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen)?;
+    // Block (on this spawn_blocking thread) until the game exits, so the JS `await invoke('play')`
+    // resolves only when the match is actually over — that's what keeps PLAY disabled (no second
+    // instance) and re-arms it afterwards. `None` = detached (gamescope) → return right away.
+    if let Some(mut c) = child { let _ = c.wait(); }
+    Ok(())
     }).await.map_err(|e| e.to_string())?
 }
 
