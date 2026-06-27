@@ -81,7 +81,17 @@ let sessionPass = '';   // in-memory only, for minting the seamless login ticket
 const app = document.querySelector('.app');
 const canvas = $('particles-canvas'), pctx = canvas.getContext('2d');
 let particles = [], currentElement = 'fire'; const MAX_PARTICLES = 70;
-function resizeCanvas(){ canvas.width = app.clientWidth; canvas.height = app.clientHeight; }
+// Cap the canvas BACKING-STORE resolution and let CSS stretch it to fill. WebKitGTK
+// software-composites the 2D canvas (the DMABUF renderer is off for the grey-screen fix), so a
+// maximised full-res canvas tanked the frame rate and the particles crawled. A ~720p buffer keeps
+// fps up; the uniform CSS stretch preserves the visual pace (a particle still crosses the screen in
+// the same wall-clock time) and keeps the aspect ratio (proportional shrink, no distortion).
+function resizeCanvas(){
+  const cw = Math.max(1, app.clientWidth), ch = Math.max(1, app.clientHeight);
+  const scale = Math.min(1, 1280 / cw);   // only shrinks the buffer once the window exceeds 1280px
+  canvas.width = Math.round(cw * scale);
+  canvas.height = Math.round(ch * scale);
+}
 const spawners = {
   fire:()=>({x:Math.random()*canvas.width,y:canvas.height+10,size:Math.random()*3+1,speedY:-(Math.random()*0.4+0.15),speedX:(Math.random()-0.5)*0.3,opacity:Math.random()*0.5+0.2,life:1,decay:Math.random()*0.002+0.001,color:Math.random()<0.7?[25,90,60]:[0,0,40]}),
   water:()=>({x:Math.random()*canvas.width,y:canvas.height+10,size:Math.random()*4+1.5,speedY:-(Math.random()*0.5+0.25),sway:Math.random()*Math.PI*2,swaySpeed:Math.random()*0.03+0.01,swayAmp:Math.random()*0.8+0.3,opacity:Math.random()*0.4+0.15,life:1,decay:Math.random()*0.002+0.001,color:[210,90,65],bubble:true}),
@@ -996,7 +1006,11 @@ $('min').addEventListener('click', ()=>{ const w=getWin(); if(w) w.minimize(); }
 async function syncMaxBtn(){ const w=getWin(); if(!w) return; let m=false; try{ m=await w.isMaximized(); }catch{}
   $('max').innerHTML = m ? '&#10064;' : '&#9723;'; $('max').title = m ? 'Restore' : 'Maximize'; }
 $('max').addEventListener('click', async ()=>{ const w=getWin(); if(!w) return;
-  try{ await w.toggleMaximize(); }catch{} syncMaxBtn(); });
+  // explicit maximize/unmaximize — these are the granted capabilities (toggleMaximize would
+  // need a separate allow-toggle-maximize permission we don't grant, and was failing silently).
+  try{ (await w.isMaximized()) ? await w.unmaximize() : await w.maximize(); }
+  catch(e){ toast('Couldn’t maximize: '+e,'err'); }
+  syncMaxBtn(); });
 (async ()=>{ const w=getWin(); if(w){ try{ await w.onResized(syncMaxBtn); }catch{} syncMaxBtn(); } })();
 $('close').addEventListener('click', ()=>{ const w=getWin(); if(w) w.close(); });
 
