@@ -528,7 +528,8 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
 .party-m .fr-av{width:24px;height:24px;font-size:10px}
 .party-m .dot{position:absolute;left:24px;top:21px;width:8px;height:8px;border-radius:50%;background:var(--smoke);border:2px solid #15101c}
 .party-m.online .dot{background:var(--good)} .party-m.in-game .dot{background:var(--gold)} .party-m.away .dot{background:var(--away)}
-.party-m .nm{flex:1;font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.party-m .nm{flex:1;min-width:0;font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.party-m .rd{flex:none;white-space:nowrap}
 .party-m.pending{opacity:.6}
 .party-m .crown{font-size:11px}
 .party-m .rd{font-size:9.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--smoke)}
