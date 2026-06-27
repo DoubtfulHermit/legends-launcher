@@ -992,6 +992,12 @@ async function loadBoard(){
 
 // window controls
 $('min').addEventListener('click', ()=>{ const w=getWin(); if(w) w.minimize(); });
+// Maximize / restore (the button between – and ×). Swap the glyph + tooltip to reflect state.
+async function syncMaxBtn(){ const w=getWin(); if(!w) return; let m=false; try{ m=await w.isMaximized(); }catch{}
+  $('max').innerHTML = m ? '&#10064;' : '&#9723;'; $('max').title = m ? 'Restore' : 'Maximize'; }
+$('max').addEventListener('click', async ()=>{ const w=getWin(); if(!w) return;
+  try{ await w.toggleMaximize(); }catch{} syncMaxBtn(); });
+(async ()=>{ const w=getWin(); if(w){ try{ await w.onResized(syncMaxBtn); }catch{} syncMaxBtn(); } })();
 $('close').addEventListener('click', ()=>{ const w=getWin(); if(w) w.close(); });
 
 // initial paint: theme first (instant), then async backend reconcile
