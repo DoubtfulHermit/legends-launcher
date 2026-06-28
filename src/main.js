@@ -70,6 +70,12 @@ function loadSave(){
 }
 let SAVE = loadSave();
 function persist(){ try{ localStorage.setItem(SAVE_KEY, JSON.stringify(SAVE)); }catch{} }
+// Persist settings to the DURABLE stores (the launcher conf + Config/arena) on every change — not just
+// on PLAY — so toggles (Proton, gamescope, Fullscreen, skip-menus, server, room, resolution) stick and
+// nobody has to keep re-flipping them. Debounced; localStorage updates immediately.
+let _saveT=null;
+function saveSettings(){ persist(); if(!HAS_TAURI) return; clearTimeout(_saveT);
+  _saveT=setTimeout(()=>{ try{ invoke('save',{ settings: gather() }); }catch(_){} }, 300); }
 
 // backend capability flags (from `load`)
 let found = false, hdAvailable = false, gsAvailable = false, ptAvailable = false;
@@ -562,7 +568,7 @@ $('frAddName').addEventListener('keydown', e=>{ if(e.key==='Enter') addFriend();
 setInterval(()=>{ if(!document.hidden && !$('view-home').hidden) loadFriends(); }, 20000);
 $('liPass').addEventListener('keydown', e=>{ if(e.key==='Enter') signIn(); });
 $('liUser').addEventListener('keydown', e=>{ if(e.key==='Enter') $('liPass').focus(); });
-$('liServer').addEventListener('input', ()=>{ SAVE.settings.server=$('liServer').value.trim(); persist(); });
+$('liServer').addEventListener('input', ()=>{ SAVE.settings.server=$('liServer').value.trim(); saveSettings(); });
 $('amSignout').addEventListener('click', signOut);
 
 // ── settings drawer ──────────────────────────────────────────────────────────
@@ -652,8 +658,8 @@ function syncMatch(){
   $('mRoom').value = SAVE.settings.room || '';
 }
 $('mSeg').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
-  SAVE.settings.queue=+b.dataset.q; persist(); syncMatch(); });
-$('mRoom').addEventListener('input', e=>{ SAVE.settings.room=e.target.value; persist(); });
+  SAVE.settings.queue=+b.dataset.q; saveSettings(); syncMatch(); });
+$('mRoom').addEventListener('input', e=>{ SAVE.settings.room=e.target.value; saveSettings(); });
 
 // ── Training setup (vs AI) ──────────────────────────────────────────────────────
 // Roster mirrors the server's BOT_ROSTER (config.py): dummy = stand-still target,
@@ -681,13 +687,13 @@ $('tBots').addEventListener('click', e=>{ const b=e.target.closest('button'); if
 $('amSettings').addEventListener('click', ()=>{ acctMenu.classList.remove('open'); openDrawer(); });
 $('drawerClose').addEventListener('click', closeDrawer);
 scrim.addEventListener('click', closeDrawer);
-$('stServer').addEventListener('input', e=>{ SAVE.settings.server=e.target.value; persist(); });
-$('stRes').addEventListener('change', e=>{ SAVE.settings.res=e.target.value; persist(); });
-$('stFs').addEventListener('click', ()=>{ SAVE.settings.fullscreen=!SAVE.settings.fullscreen; persist(); syncDrawer(); });
-$('stSkip').addEventListener('click', ()=>{ SAVE.settings.skip_menu=!SAVE.settings.skip_menu; persist(); syncDrawer(); });
-$('stGs').addEventListener('click', ()=>{ if(!gsAvailable) return; SAVE.settings.gamescope=!SAVE.settings.gamescope; persist(); syncDrawer(); });
-$('stGsArgs').addEventListener('input', e=>{ SAVE.settings.gamescope_args=e.target.value; persist(); });
-$('stProton').addEventListener('click', ()=>{ if(!ptAvailable) return; SAVE.settings.proton=!SAVE.settings.proton; persist(); syncDrawer(); });
+$('stServer').addEventListener('input', e=>{ SAVE.settings.server=e.target.value; saveSettings(); });
+$('stRes').addEventListener('change', e=>{ SAVE.settings.res=e.target.value; saveSettings(); });
+$('stFs').addEventListener('click', ()=>{ SAVE.settings.fullscreen=!SAVE.settings.fullscreen; saveSettings(); syncDrawer(); });
+$('stSkip').addEventListener('click', ()=>{ SAVE.settings.skip_menu=!SAVE.settings.skip_menu; saveSettings(); syncDrawer(); });
+$('stGs').addEventListener('click', ()=>{ if(!gsAvailable) return; SAVE.settings.gamescope=!SAVE.settings.gamescope; saveSettings(); syncDrawer(); });
+$('stGsArgs').addEventListener('input', e=>{ SAVE.settings.gamescope_args=e.target.value; saveSettings(); });
+$('stProton').addEventListener('click', ()=>{ if(!ptAvailable) return; SAVE.settings.proton=!SAVE.settings.proton; saveSettings(); syncDrawer(); });
 // HD textures swap immediately (the engine only reads them at startup → next launch)
 $('stHd').addEventListener('click', async ()=>{
   if(!hdAvailable) return;
@@ -722,6 +728,52 @@ async function pollStatus(){
 }
 
 // ── PLAY ─────────────────────────────────────────────────────────────────────
+// Render the in-game loading screen here (the launcher's real gradients, ember glow, element emblem
+// SVG, Cinzel) onto a canvas and hand the raw pixels to Rust → BMP → the in-game cover blits it, so
+// the loader looks IDENTICAL to the launcher. The DLL only animates the bottom bar/prompt on top.
+const LD_PAL = {
+  fire:{g:['#2a1a3a','#5e2f33','#b5683a','#160c12'],gold:'#ff8a30',ember:'#ff5a0a'},
+  water:{g:['#0e2138','#163a58','#3a86b2','#091420'],gold:'#8fd0ff',ember:'#4aa8ff'},
+  earth:{g:['#222a14','#3a431c','#7e7a30','#14110a'],gold:'#c8de7e',ember:'#a3c14a'},
+  air:{g:['#1a2630','#2c4450','#6fa6b4','#0e171f'],gold:'#e0f5f1',ember:'#b6e3dc'},
+};
+function _hexRgb(h){ const n=parseInt(h.slice(1),16); return ((n>>16)&255)+','+((n>>8)&255)+','+(n&255); }
+function _u8b64(u8){ let s=''; const C=0x8000; for(let i=0;i<u8.length;i+=C) s+=String.fromCharCode.apply(null,u8.subarray(i,i+C)); return btoa(s); }
+async function renderLoadingImage(element, name, nation, room, party){
+  if(!HAS_TAURI) return;
+  const p = LD_PAL[element] || LD_PAL.air, W=1440, H=1080;
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const ctx=cv.getContext('2d');
+  const lg=ctx.createLinearGradient(0,0,0,H);
+  lg.addColorStop(0,p.g[0]); lg.addColorStop(.34,p.g[1]); lg.addColorStop(.62,p.g[2]); lg.addColorStop(1,p.g[3]);
+  ctx.fillStyle=lg; ctx.fillRect(0,0,W,H);
+  const er=_hexRgb(p.ember);
+  const rg=ctx.createRadialGradient(W*.5,-H*.05,0,W*.5,-H*.05,H*.95);
+  rg.addColorStop(0,`rgba(${er},.36)`); rg.addColorStop(.5,`rgba(${er},.09)`); rg.addColorStop(1,`rgba(${er},0)`);
+  ctx.fillStyle=rg; ctx.fillRect(0,0,W,H);
+  const vg=ctx.createRadialGradient(W*.5,H*1.15,0,W*.5,H*1.15,H*.75);
+  vg.addColorStop(0,'rgba(0,0,0,.6)'); vg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
+  // element emblem (the launcher's SVG), tinted gold
+  const sym=document.getElementById('el-'+element);
+  if(sym){
+    const vb=sym.getAttribute('viewBox')||'0 0 100 100';
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" style="color:${p.gold}">${sym.innerHTML}</svg>`;
+    await new Promise(res=>{ const im=new Image(); im.onload=()=>{ ctx.save(); ctx.globalAlpha=.95; ctx.shadowColor=`rgba(${er},.5)`; ctx.shadowBlur=40;
+        const es=320; ctx.drawImage(im,(W-es)/2,H*.085,es,es); ctx.restore(); res(); };
+      im.onerror=res; im.src='data:image/svg+xml;utf8,'+encodeURIComponent(svg); });
+  }
+  try{ if(document.fonts) await document.fonts.ready; }catch(_){}
+  ctx.textAlign='center';
+  ctx.save(); ctx.shadowColor='rgba(0,0,0,.55)'; ctx.shadowBlur=22; ctx.shadowOffsetY=5;
+  ctx.fillStyle=p.gold; ctx.font='700 96px Cinzel, serif'; ctx.fillText('LEGENDS AWAKENED', W/2, H*.52); ctx.restore();
+  ctx.fillStyle='#cabda9'; ctx.font='400 30px Inter, system-ui, sans-serif'; ctx.fillText('Your match awaits', W/2, H*.575);
+  ctx.fillStyle=p.gold; ctx.font='700 50px Cinzel, serif'; ctx.fillText(nation? name+'   ·   '+nation : name, W/2, H*.70);
+  ctx.fillStyle='#bbb09c'; ctx.font='400 28px Inter, system-ui, sans-serif';
+  let yy=H*.745; if(room){ ctx.fillText('Room: '+room, W/2, yy); yy+=44; } if(party){ ctx.fillText('Party: '+party, W/2, yy); }
+  const px=ctx.getImageData(0,0,W,H).data;
+  await invoke('save_loading_image', { width:W, height:H, data:_u8b64(new Uint8Array(px.buffer)) });
+}
 function setPlayLabel(t){ document.querySelector('.play-label').textContent=t; }
 function gather(){
   const st=SAVE.settings; const [w,h]=(st.res||'1440x1080').split('x').map(Number);
@@ -788,7 +840,13 @@ async function play(roomOverride, queueOverride){
   try{
     // invoke('play') now resolves only when the GAME EXITS (the Rust side waits on the child).
     // So PLAY stays disabled for the whole match (no 2nd instance), and we minimise meanwhile.
-    const launched = invoke('play',{ settings, windowed:!settings.fullscreen, username, ticket });
+    // themed loading card: pass the selected element + party so the in-game cover matches the launcher
+    const element = SAVE.element || (typeof currentElement!=='undefined' ? currentElement : '') || 'air';
+    const party = (partyData && partyData.party && partyData.party.members && partyData.party.members.length>1)
+      ? partyData.party.members.map(m=>m.name).join(', ') : '';
+    // (loading-image render temporarily disabled — the raw-pixel IPC payload was too large and could
+    // stall the webview; being redone with a small PNG. The DLL falls back to the GDI/Cinzel card.)
+    const launched = invoke('play',{ settings, windowed:!settings.fullscreen, username, ticket, element, party });
     toast(ticket ? 'Logging you in…' : 'Launching…','ok');
     _inGame=true; setPlayLabel('IN GAME');
     setTimeout(()=>{ if(w && _inGame) w.minimize(); }, 1500);   // let the game grab focus, then drop the launcher

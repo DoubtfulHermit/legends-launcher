@@ -194,6 +194,10 @@ fn read_prefs(s: &mut Settings) {
                     "gamescope_args" => s.gamescope_args = v.trim().to_string(),
                     "skip_menu" => s.skip_menu = v.trim() == "1" || v.trim().eq_ignore_ascii_case("true"),
                     "proton" => s.proton = v.trim() == "1" || v.trim().eq_ignore_ascii_case("true"),
+                    // fullscreen lives here (the user's INTENT) because play() flips Config.ini's
+                    // FullScreen to windowed for the Proton+gamescope path — reading it back from Config
+                    // would reset the toggle every launch. The conf keeps the real choice.
+                    "fullscreen" => s.fullscreen = v.trim() == "1" || v.trim().eq_ignore_ascii_case("true"),
                     _ => {}
                 }
             }
@@ -203,9 +207,9 @@ fn read_prefs(s: &mut Settings) {
 fn write_prefs(s: &Settings) {
     if let Some(p) = prefs_path() {
         if let Some(parent) = p.parent() { let _ = fs::create_dir_all(parent); }
-        let _ = fs::write(p, format!("gamescope={}\ngamescope_args={}\nskip_menu={}\nproton={}\n",
+        let _ = fs::write(p, format!("gamescope={}\ngamescope_args={}\nskip_menu={}\nproton={}\nfullscreen={}\n",
             if s.gamescope { 1 } else { 0 }, s.gamescope_args, if s.skip_menu { 1 } else { 0 },
-            if s.proton { 1 } else { 0 }));
+            if s.proton { 1 } else { 0 }, if s.fullscreen { 1 } else { 0 }));
     }
 }
 
@@ -280,6 +284,72 @@ fn write_game_creds(dir: &Path, username: &str, ticket: &str) {
 // ticket never lingers.
 fn quickmatch_creds(dir: &Path) -> PathBuf { dir.join("BuildingBlocks").join("zz_quickmatch.creds") }
 fn clear_game_creds(dir: &Path) { let _ = fs::remove_file(quickmatch_creds(dir)); }
+
+// Themed loading-card data the in-game cover (zz_quickmatch.dll) reads at PLAY: the selected element
+// (drives the theme), the player name + nation, the party, and the room — so the loading screen
+// matches the launcher. Written fresh per logged-in launch; cleared otherwise.
+fn loading_ini(dir: &Path) -> PathBuf { dir.join("BuildingBlocks").join("zz_loading.ini") }
+fn write_loading(dir: &Path, element: &str, name: &str, nation: &str, party: &str, room: &str) {
+    let body = format!("element={element}\nname={name}\nnation={nation}\nparty={party}\nroom={room}\n");
+    let _ = fs::write(loading_ini(dir), body);
+}
+fn clear_loading(dir: &Path) {
+    let _ = fs::remove_file(loading_ini(dir));
+    let _ = fs::remove_file(dir.join("BuildingBlocks").join("zz_loading.bmp"));
+}
+
+// The launcher renders the loading screen (its real CSS/SVG/Cinzel) to a <canvas> and hands the raw
+// RGBA here; we write it as a 24-bit BMP the in-game cover blits, so the loader looks IDENTICAL to the
+// launcher. (Base64 to avoid a giant JSON byte array; tiny inline decoder to avoid a new dep.)
+fn b64_decode(s: &str) -> Vec<u8> {
+    let mut t = [255u8; 256];
+    for (i, c) in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".iter().enumerate() {
+        t[*c as usize] = i as u8;
+    }
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut buf, mut bits) = (0u32, 0u32);
+    for &c in s.as_bytes() {
+        let v = t[c as usize];
+        if v == 255 { continue; }
+        buf = (buf << 6) | v as u32; bits += 6;
+        if bits >= 8 { bits -= 8; out.push((buf >> bits) as u8); }
+    }
+    out
+}
+fn write_loading_bmp(dir: &Path, w: u32, h: u32, rgba: &[u8]) {
+    let (wn, hn) = (w as usize, h as usize);
+    if wn == 0 || hn == 0 || rgba.len() < wn * hn * 4 { return; }
+    let rowpad = (wn * 3 + 3) & !3;
+    let imgsize = rowpad * hn;
+    let mut b: Vec<u8> = Vec::with_capacity(54 + imgsize);
+    b.extend_from_slice(b"BM");
+    b.extend_from_slice(&((54 + imgsize) as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.extend_from_slice(&54u32.to_le_bytes());
+    b.extend_from_slice(&40u32.to_le_bytes());
+    b.extend_from_slice(&(w as i32).to_le_bytes());
+    b.extend_from_slice(&(h as i32).to_le_bytes());            // positive = bottom-up
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&24u16.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.extend_from_slice(&(imgsize as u32).to_le_bytes());
+    b.extend_from_slice(&2835i32.to_le_bytes());
+    b.extend_from_slice(&2835i32.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    for y in (0..hn).rev() {
+        let base = y * wn * 4;
+        for x in 0..wn { let i = base + x * 4; b.push(rgba[i + 2]); b.push(rgba[i + 1]); b.push(rgba[i]); }
+        for _ in 0..(rowpad - wn * 3) { b.push(0); }
+    }
+    let _ = fs::write(dir.join("BuildingBlocks").join("zz_loading.bmp"), b);
+}
+#[tauri::command]
+fn save_loading_image(width: u32, height: u32, data: String) -> Result<(), String> {
+    let dir = resolve_game_dir().ok_or("game folder not found")?;
+    write_loading_bmp(&dir, width, height, &b64_decode(&data));
+    Ok(())
+}
 
 fn write_launch_debug(dir: &Path, exe_path: &Path, auto_login: bool, skip_env: &str, auto_login_env: &str) {
     let body = format!(
@@ -1070,13 +1140,16 @@ fn spawn_game(dir: &Path, exe_path: &Path, auto_login: bool, gamescope: bool, ga
 }
 
 #[tauri::command]
-async fn play(settings: Settings, windowed: bool, username: Option<String>, ticket: Option<String>) -> Result<(), String> {
+async fn play(settings: Settings, windowed: bool, username: Option<String>, ticket: Option<String>,
+              element: Option<String>, party: Option<String>) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
     let dir = resolve_game_dir().ok_or("game folder not found")?;
     // The ⊡ Windowed button forces a window regardless of the Fullscreen toggle.
     let mut s = settings;
+    // Persist the user's REAL settings intent FIRST — before the ⊡ Windowed one-time override and the
+    // gamescope/Proton windowed override — so toggles (incl. Fullscreen) survive every launch.
+    write_prefs(&s);
     if windowed { s.fullscreen = false; }
-    write_prefs(&s);   // save the user's real toggles (gamescope/args) before overrides
     // The user's real fullscreen intent (Fullscreen toggle, minus the ⊡ Windowed button).
     // It drives whether gamescope gets -f; the game itself always runs WINDOWED inside
     // gamescope (that's what gives a centered, clickable game on Wayland — wine's own
@@ -1099,6 +1172,12 @@ async fn play(settings: Settings, windowed: bool, username: Option<String>, tick
     let logged_in = s.skip_menu && !uname.is_empty() && !tk.is_empty();
     write_quickmatch(&dir, s.skip_menu, logged_in);
     if logged_in { write_game_creds(&dir, &uname, tk); } else { clear_game_creds(&dir); }
+    // Themed loading card: hand the in-game cover the selected element + identity + party + room.
+    if logged_in {
+        let el = element.as_deref().unwrap_or("").trim().to_lowercase();
+        let nation = match el.as_str() { "fire"=>"Fire","water"=>"Water","earth"=>"Earth","air"=>"Air", _=>"" };
+        write_loading(&dir, &el, &uname, nation, party.as_deref().unwrap_or("").trim(), s.room.trim());
+    } else { clear_loading(&dir); }
     // Safety net: make sure the live textures match the toggle (normally a no-op —
     // set_textures already applied it when the toggle was flipped).
     apply_textures(&dir, s.hd_textures)?;
@@ -1558,7 +1637,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, invite_send, invite_respond, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start, account_forgot, account_change_password, account_delete, session_logout_all, os_notify])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, invite_send, invite_respond, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start, account_forgot, account_change_password, account_delete, session_logout_all, os_notify, save_loading_image])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
