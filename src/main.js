@@ -728,52 +728,91 @@ async function pollStatus(){
 }
 
 // ── PLAY ─────────────────────────────────────────────────────────────────────
-// Render the in-game loading screen here (the launcher's real gradients, ember glow, element emblem
-// SVG, Cinzel) onto a canvas and hand the raw pixels to Rust → BMP → the in-game cover blits it, so
-// the loader looks IDENTICAL to the launcher. The DLL only animates the bottom bar/prompt on top.
-const LD_PAL = {
-  fire:{g:['#2a1a3a','#5e2f33','#b5683a','#160c12'],gold:'#ff8a30',ember:'#ff5a0a'},
-  water:{g:['#0e2138','#163a58','#3a86b2','#091420'],gold:'#8fd0ff',ember:'#4aa8ff'},
-  earth:{g:['#222a14','#3a431c','#7e7a30','#14110a'],gold:'#c8de7e',ember:'#a3c14a'},
-  air:{g:['#1a2630','#2c4450','#6fa6b4','#0e171f'],gold:'#e0f5f1',ember:'#b6e3dc'},
-};
-function _hexRgb(h){ const n=parseInt(h.slice(1),16); return ((n>>16)&255)+','+((n>>8)&255)+','+(n&255); }
-function _u8b64(u8){ let s=''; const C=0x8000; for(let i=0;i<u8.length;i+=C) s+=String.fromCharCode.apply(null,u8.subarray(i,i+C)); return btoa(s); }
-async function renderLoadingImage(element, name, nation, room, party){
+// Render the in-game loading screen here, from the launcher's OWN tokens (near-black warm bg, the
+// player's element/nation crest + an accent glow, Cinzel) → a compressed PNG that Rust writes as the
+// BMP the in-game cover blits, so the loader looks IDENTICAL to the launcher. The crest is the player's
+// own nation, the title takes the element colour. The bottom is left clear: the DLL overlays the
+// animated loading bar / "PRESS SPACE" prompt there.
+const LD_ACCENT = { earth:'#a3c14a', fire:'#ff5a0a', water:'#4aa8ff', air:'#b6e3dc', neutral:'#ffb24a' };
+const LD_GOLD='#ffb24a', LD_EMBER='#ff7a2e', LD_MUT='#a99c89';
+function _hexRgb(h){ const n=parseInt(h.slice(1),16); return [(n>>16)&255,(n>>8)&255,n&255]; }
+function _rgba(h,a){ const c=_hexRgb(h); return `rgba(${c[0]},${c[1]},${c[2]},${a})`; }
+function _roundRect(ctx,x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+async function renderLoadingImage(element, name, nation, room, party, W, H){
   if(!HAS_TAURI) return;
-  const p = LD_PAL[element] || LD_PAL.air, W=1440, H=1080;
+  element=(element||'air').toLowerCase();
+  const acc=LD_ACCENT[element] || LD_ACCENT.neutral;
+  W=Math.max(640,(W|0)||1920); H=Math.max(480,(H|0)||1080);
   const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
   const ctx=cv.getContext('2d');
-  const lg=ctx.createLinearGradient(0,0,0,H);
-  lg.addColorStop(0,p.g[0]); lg.addColorStop(.34,p.g[1]); lg.addColorStop(.62,p.g[2]); lg.addColorStop(1,p.g[3]);
-  ctx.fillStyle=lg; ctx.fillRect(0,0,W,H);
-  const er=_hexRgb(p.ember);
-  const rg=ctx.createRadialGradient(W*.5,-H*.05,0,W*.5,-H*.05,H*.95);
-  rg.addColorStop(0,`rgba(${er},.36)`); rg.addColorStop(.5,`rgba(${er},.09)`); rg.addColorStop(1,`rgba(${er},0)`);
-  ctx.fillStyle=rg; ctx.fillRect(0,0,W,H);
-  const vg=ctx.createRadialGradient(W*.5,H*1.15,0,W*.5,H*1.15,H*.75);
-  vg.addColorStop(0,'rgba(0,0,0,.6)'); vg.addColorStop(1,'rgba(0,0,0,0)');
+  // near-black warm bg (launcher --bg)
+  const bg=ctx.createLinearGradient(0,0,0,H);
+  bg.addColorStop(0,'#0b0910'); bg.addColorStop(.55,'#090710'); bg.addColorStop(1,'#070509');
+  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+  // element accent glow behind the crest
+  const eg=ctx.createRadialGradient(W*.5,H*.30,0,W*.5,H*.30,H*.62);
+  eg.addColorStop(0,_rgba(acc,.16)); eg.addColorStop(.45,_rgba(acc,.05)); eg.addColorStop(1,_rgba(acc,0));
+  ctx.fillStyle=eg; ctx.fillRect(0,0,W,H);
+  // warm ember kiss from the top + bottom vignette
+  const tg=ctx.createRadialGradient(W*.5,-H*.06,0,W*.5,-H*.06,H*.7);
+  tg.addColorStop(0,_rgba(LD_EMBER,.10)); tg.addColorStop(1,_rgba(LD_EMBER,0));
+  ctx.fillStyle=tg; ctx.fillRect(0,0,W,H);
+  const vg=ctx.createRadialGradient(W*.5,H*1.1,0,W*.5,H*1.1,H*.8);
+  vg.addColorStop(0,'rgba(0,0,0,.55)'); vg.addColorStop(1,'rgba(0,0,0,0)');
   ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
-  // element emblem (the launcher's SVG), tinted gold
+  ctx.fillStyle=_rgba(LD_GOLD,.10); ctx.fillRect(0,0,W,2); ctx.fillRect(0,H-2,W,2);
+  // element crest (the player's own nation emblem), tinted in the element accent
   const sym=document.getElementById('el-'+element);
   if(sym){
     const vb=sym.getAttribute('viewBox')||'0 0 100 100';
-    const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" style="color:${p.gold}">${sym.innerHTML}</svg>`;
-    await new Promise(res=>{ const im=new Image(); im.onload=()=>{ ctx.save(); ctx.globalAlpha=.95; ctx.shadowColor=`rgba(${er},.5)`; ctx.shadowBlur=40;
-        const es=320; ctx.drawImage(im,(W-es)/2,H*.085,es,es); ctx.restore(); res(); };
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" style="color:${acc}">${sym.innerHTML}</svg>`;
+    await new Promise(res=>{ const im=new Image();
+      im.onload=()=>{ const es=Math.round(H*.30); ctx.save(); ctx.globalAlpha=.92;
+        ctx.shadowColor=_rgba(acc,.55); ctx.shadowBlur=H*.05; ctx.drawImage(im,(W-es)/2,H*.085,es,es); ctx.restore(); res(); };
       im.onerror=res; im.src='data:image/svg+xml;utf8,'+encodeURIComponent(svg); });
   }
   try{ if(document.fonts) await document.fonts.ready; }catch(_){}
   ctx.textAlign='center';
-  ctx.save(); ctx.shadowColor='rgba(0,0,0,.55)'; ctx.shadowBlur=22; ctx.shadowOffsetY=5;
-  ctx.fillStyle=p.gold; ctx.font='700 96px Cinzel, serif'; ctx.fillText('LEGENDS AWAKENED', W/2, H*.52); ctx.restore();
-  ctx.fillStyle='#cabda9'; ctx.font='400 30px Inter, system-ui, sans-serif'; ctx.fillText('Your match awaits', W/2, H*.575);
-  ctx.fillStyle=p.gold; ctx.font='700 50px Cinzel, serif'; ctx.fillText(nation? name+'   ·   '+nation : name, W/2, H*.70);
-  ctx.fillStyle='#bbb09c'; ctx.font='400 28px Inter, system-ui, sans-serif';
-  let yy=H*.745; if(room){ ctx.fillText('Room: '+room, W/2, yy); yy+=44; } if(party){ ctx.fillText('Party: '+party, W/2, yy); }
-  const px=ctx.getImageData(0,0,W,H).data;
-  await invoke('save_loading_image', { width:W, height:H, data:_u8b64(new Uint8Array(px.buffer)) });
+  // title — element-tinted Cinzel, wide tracking, accent halo
+  const ts=Math.round(H*.066);
+  ctx.save(); ctx.font=`900 ${ts}px Cinzel, serif`;
+  if('letterSpacing' in ctx) ctx.letterSpacing=Math.round(ts*.14)+'px';
+  ctx.shadowColor=_rgba(acc,.45); ctx.shadowBlur=H*.05; ctx.fillStyle=acc;
+  ctx.fillText('LEGENDS AWAKENED', W/2, H*.50); ctx.restore();
+  // gold accent rule + centre diamond
+  const rw=W*.16, rx=W/2, rl=ctx.createLinearGradient(rx-rw/2,0,rx+rw/2,0);
+  rl.addColorStop(0,_rgba(LD_GOLD,0)); rl.addColorStop(.5,_rgba(LD_GOLD,.85)); rl.addColorStop(1,_rgba(LD_GOLD,0));
+  ctx.fillStyle=rl; ctx.fillRect(rx-rw/2,H*.535,rw,2);
+  ctx.save(); ctx.translate(rx,H*.536); ctx.rotate(Math.PI/4); ctx.fillStyle=LD_GOLD; ctx.fillRect(-4,-4,8,8); ctx.restore();
+  // subtitle — muted, tracked
+  const ss=Math.round(H*.021);
+  ctx.save(); ctx.font=`500 ${ss}px Inter, system-ui, sans-serif`;
+  if('letterSpacing' in ctx) ctx.letterSpacing=Math.round(ss*.32)+'px';
+  ctx.fillStyle=LD_MUT; ctx.fillText('ENTERING THE ARENA', W/2, H*.575); ctx.restore();
+  // framed player card (launcher panel) — name · nation + room/party
+  if(name){
+    const cw=Math.min(W*.46,720), ch=H*(party?.155:.115), cx=(W-cw)/2, cy=H*.61;
+    ctx.save();
+    ctx.fillStyle='rgba(22,17,27,.62)'; _roundRect(ctx,cx,cy,cw,ch,16); ctx.fill();
+    ctx.lineWidth=1.5; ctx.strokeStyle=_rgba(LD_GOLD,.18); _roundRect(ctx,cx,cy,cw,ch,16); ctx.stroke();
+    ctx.fillStyle=_rgba(acc,.55); _roundRect(ctx,cx+cw*.30,cy-1,cw*.40,2,1); ctx.fill();
+    ctx.restore();
+    let ty=cy+ch*(party?.30:.40);
+    const ns=Math.round(H*.038);
+    ctx.save(); ctx.font=`700 ${ns}px Cinzel, serif`; if('letterSpacing' in ctx) ctx.letterSpacing=Math.round(ns*.04)+'px';
+    ctx.fillStyle=LD_GOLD; ctx.fillText(nation? `${name}   ·   ${nation}` : name, W/2, ty); ctx.restore();
+    ty+=H*.05; const ms=Math.round(H*.020);
+    ctx.font=`400 ${ms}px Inter, system-ui, sans-serif`; ctx.fillStyle=LD_MUT;
+    if(room){ ctx.fillText('Room  '+room, W/2, ty); ty+=H*.034; }
+    if(party){ ctx.fillText('Party  '+party, W/2, ty); }
+  }
+  // export a COMPRESSED PNG (tiny vs the old raw-RGBA payload that stalled the webview)
+  const url=cv.toDataURL('image/png'); const b64=url.slice(url.indexOf(',')+1);
+  await invoke('save_loading_image', { data:b64 });
 }
+// Map the selected element to its display nation name for the loading card.
+const LD_NATION = { earth:'Earth', fire:'Fire', water:'Water', air:'Air', neutral:'Neutral' };
 function setPlayLabel(t){ document.querySelector('.play-label').textContent=t; }
 function gather(){
   const st=SAVE.settings; const [w,h]=(st.res||'1440x1080').split('x').map(Number);
@@ -845,11 +884,17 @@ async function play(roomOverride, queueOverride){
     // invoke('play') now resolves only when the GAME EXITS (the Rust side waits on the child).
     // So PLAY stays disabled for the whole match (no 2nd instance), and we minimise meanwhile.
     // themed loading card: pass the selected element + party so the in-game cover matches the launcher
-    const element = SAVE.element || (typeof currentElement!=='undefined' ? currentElement : '') || 'air';
+    const element = (SAVE.element || (typeof currentElement!=='undefined' ? currentElement : '') || 'air').toLowerCase();
     const party = (partyData && partyData.party && partyData.party.members && partyData.party.members.length>1)
       ? partyData.party.members.map(m=>m.name).join(', ') : '';
-    // (loading-image render temporarily disabled — the raw-pixel IPC payload was too large and could
-    // stall the webview; being redone with a small PNG. The DLL falls back to the GDI/Cinzel card.)
+    // Render the loading screen from the launcher's own tokens → BMP the in-game cover blits (so the
+    // loader matches the launcher). Now a small PNG payload (the old raw-RGBA one stalled the webview).
+    // Must finish BEFORE the game spawns so the image exists when the DLL loads. Never block launch on it.
+    try{
+      const who = (SAVE.session && SAVE.session.name) || username || '';
+      await renderLoadingImage(element, who, LD_NATION[element]||'', (settings.room||'').trim(), party,
+                               settings.width, settings.height);
+    }catch(e){ /* fall back to the DLL's GDI card */ }
     const launched = invoke('play',{ settings, windowed:!settings.fullscreen, username, ticket, element, party });
     toast(ticket ? 'Logging you in…' : 'Launching…','ok');
     _inGame=true; setStatus('in match'); setPlayLabel('IN GAME');

@@ -333,9 +333,10 @@ fn clear_loading(dir: &Path) {
     let _ = fs::remove_file(dir.join("BuildingBlocks").join("zz_loading.bmp"));
 }
 
-// The launcher renders the loading screen (its real CSS/SVG/Cinzel) to a <canvas> and hands the raw
-// RGBA here; we write it as a 24-bit BMP the in-game cover blits, so the loader looks IDENTICAL to the
-// launcher. (Base64 to avoid a giant JSON byte array; tiny inline decoder to avoid a new dep.)
+// The launcher renders the loading screen (its real CSS/SVG/Cinzel) to a <canvas>, exports a COMPRESSED
+// PNG (base64), and hands it here; we decode it and write a 24-bit BMP the in-game cover blits, so the
+// loader looks IDENTICAL to the launcher. PNG (not raw RGBA) keeps the IPC payload tiny — the old
+// multi-MB raw payload stalled the webview. (Tiny inline base64 decoder to avoid a dep for that part.)
 fn b64_decode(s: &str) -> Vec<u8> {
     let mut t = [255u8; 256];
     for (i, c) in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".iter().enumerate() {
@@ -380,9 +381,25 @@ fn write_loading_bmp(dir: &Path, w: u32, h: u32, rgba: &[u8]) {
     let _ = fs::write(dir.join("BuildingBlocks").join("zz_loading.bmp"), b);
 }
 #[tauri::command]
-fn save_loading_image(width: u32, height: u32, data: String) -> Result<(), String> {
+fn save_loading_image(data: String) -> Result<(), String> {
     let dir = resolve_game_dir().ok_or("game folder not found")?;
-    write_loading_bmp(&dir, width, height, &b64_decode(&data));
+    let bytes = b64_decode(&data);
+    let dec = png::Decoder::new(std::io::Cursor::new(bytes));
+    let mut reader = dec.read_info().map_err(|e| e.to_string())?;
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
+    let (w, h) = (info.width, info.height);
+    // Normalize to RGBA8 for write_loading_bmp (canvas exports truecolor RGB or RGBA, 8-bit).
+    let rgba: Vec<u8> = match info.color_type {
+        png::ColorType::Rgba => buf[..info.buffer_size()].to_vec(),
+        png::ColorType::Rgb => {
+            let mut o = Vec::with_capacity(w as usize * h as usize * 4);
+            for px in buf[..info.buffer_size()].chunks_exact(3) { o.extend_from_slice(px); o.push(255); }
+            o
+        }
+        _ => return Err("unsupported PNG color type for loading image".into()),
+    };
+    write_loading_bmp(&dir, w, h, &rgba);
     Ok(())
 }
 
