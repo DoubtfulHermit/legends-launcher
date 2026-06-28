@@ -23,12 +23,14 @@ struct Settings {
     gamescope_args: String, // extra gamescope args (GPU/output, e.g. "--prefer-vk-device 1002:1638 -W 1920 -H 1080")
     #[serde(default)]
     skip_menu: bool,        // PLAY straight into the arena queue (toggles BuildingBlocks/zz_quickmatch.ini enabled)
+    #[serde(default)]
+    proton: bool,           // Linux: run the game through Proton (umu-run + DXVK) instead of raw wine
 }
 impl Default for Settings {
     fn default() -> Self {
         Settings { host: String::new(), room: String::new(), queue: 4,
                    fullscreen: true, width: 1440, height: 1080, hd_textures: false,
-                   gamescope: false, gamescope_args: String::new(), skip_menu: false }
+                   gamescope: false, gamescope_args: String::new(), skip_menu: false, proton: false }
     }
 }
 
@@ -41,6 +43,7 @@ struct LoadResult {
     resolutions: Vec<[u32; 2]>, // selectable resolutions (curated + native + current)
     hd_available: bool,         // both Textures.original/ and Textures.hd/ exist
     gamescope_available: bool,  // Linux + gamescope on PATH (so the toggle is usable)
+    proton_available: bool,     // Linux + umu-run on PATH (so the Proton toggle is usable)
     version: String,            // launcher version (CARGO_PKG_VERSION), shown in the UI
     cloned: bool,               // a user-writable patched clone exists
     needs_clone: bool,          // an original is located but not yet cloned → show the first-run wizard
@@ -190,6 +193,7 @@ fn read_prefs(s: &mut Settings) {
                     "gamescope" => s.gamescope = v.trim() == "1" || v.trim().eq_ignore_ascii_case("true"),
                     "gamescope_args" => s.gamescope_args = v.trim().to_string(),
                     "skip_menu" => s.skip_menu = v.trim() == "1" || v.trim().eq_ignore_ascii_case("true"),
+                    "proton" => s.proton = v.trim() == "1" || v.trim().eq_ignore_ascii_case("true"),
                     _ => {}
                 }
             }
@@ -199,8 +203,9 @@ fn read_prefs(s: &mut Settings) {
 fn write_prefs(s: &Settings) {
     if let Some(p) = prefs_path() {
         if let Some(parent) = p.parent() { let _ = fs::create_dir_all(parent); }
-        let _ = fs::write(p, format!("gamescope={}\ngamescope_args={}\nskip_menu={}\n",
-            if s.gamescope { 1 } else { 0 }, s.gamescope_args, if s.skip_menu { 1 } else { 0 }));
+        let _ = fs::write(p, format!("gamescope={}\ngamescope_args={}\nskip_menu={}\nproton={}\n",
+            if s.gamescope { 1 } else { 0 }, s.gamescope_args, if s.skip_menu { 1 } else { 0 },
+            if s.proton { 1 } else { 0 }));
     }
 }
 
@@ -500,6 +505,7 @@ fn load(app: tauri::AppHandle) -> LoadResult {
     let native = app.primary_monitor().ok().flatten()
         .map(|m| { let s = m.size(); [s.width, s.height] }).unwrap_or([0, 0]);
     let gs = gamescope_available();
+    let pt = proton_available();
     // clone state (see docs/handoff_patching.md): an original located but not yet
     // cloned → first-run wizard; once cloned, resolve_game_dir() returns the clone.
     let cloned = clone_dir().map(|c| is_game_dir(&c)).unwrap_or(false);
@@ -514,6 +520,7 @@ fn load(app: tauri::AppHandle) -> LoadResult {
             let resolutions = resolution_list(native, [settings.width, settings.height]);
             LoadResult { found: true, game_dir: Some(dir.to_string_lossy().into()), settings,
                          native, resolutions, hd_available: hd_available(&dir), gamescope_available: gs,
+                         proton_available: pt,
                          version: env!("CARGO_PKG_VERSION").into(), cloned, needs_clone, original_dir }
         }
         None => {
@@ -521,7 +528,7 @@ fn load(app: tauri::AppHandle) -> LoadResult {
             read_prefs(&mut settings);
             let resolutions = resolution_list(native, [settings.width, settings.height]);
             LoadResult { found: false, game_dir: None, settings, native, resolutions,
-                         hd_available: false, gamescope_available: gs,
+                         hd_available: false, gamescope_available: gs, proton_available: pt,
                          version: env!("CARGO_PKG_VERSION").into(), cloned, needs_clone, original_dir }
         }
     }
@@ -883,13 +890,42 @@ fn gamescope_available() -> bool {
     #[cfg(not(target_os = "linux"))] { false }
 }
 
+// Whether the Proton toggle should be offered: Linux + umu-run installed (umu fetches Proton itself).
+fn proton_available() -> bool {
+    #[cfg(target_os = "linux")] { on_path("umu-run") }
+    #[cfg(not(target_os = "linux"))] { false }
+}
+// A dedicated Proton prefix (kept separate from the wine prefix the rest of the game uses).
+#[cfg(target_os = "linux")]
+fn proton_prefix() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share/legends-awakened/proton-pfx"))
+}
+// Find an installed GE-Proton so umu doesn't have to download one. Returns the first GE-Proton
+// found in the standard Steam compat-tools dirs; None → let umu-run fetch its default UMU-Proton.
+#[cfg(target_os = "linux")]
+fn find_proton_path() -> Option<PathBuf> {
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    for d in [".steam/root/compatibilitytools.d", ".local/share/Steam/compatibilitytools.d",
+              ".steam/steam/compatibilitytools.d"] {
+        if let Ok(rd) = fs::read_dir(home.join(d)) {
+            for e in rd.flatten() {
+                let n = e.file_name().to_string_lossy().into_owned();
+                if n.starts_with("GE-Proton") && e.path().join("proton").is_file() {
+                    return Some(e.path());
+                }
+            }
+        }
+    }
+    None
+}
+
 // `gamescope`/`gamescope_args` come from the launcher's Display toggle (Linux only).
 // Env vars (AVATAR_GAMESCOPE / AVATAR_GAMESCOPE_ARGS / AVATAR_VK_ICD) still override.
 #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
 // Launch the game. Returns the child process when we can track it (so the caller can wait for
 // the game to exit) — or None when it's detached on purpose (gamescope via setsid).
 fn spawn_game(dir: &Path, exe_path: &Path, auto_login: bool, gamescope: bool, gamescope_args: &str,
-              width: u32, height: u32, fullscreen: bool) -> Result<Option<std::process::Child>, String> {
+              width: u32, height: u32, fullscreen: bool, proton: bool) -> Result<Option<std::process::Child>, String> {
     use std::process::Command;
     // Login-only is not skip/queue. Keep the old skip env off for Auto sign-in and use a separate
     // marker so the DLL installs only the login driver + observers, not the queue-era hooks.
@@ -923,6 +959,54 @@ fn spawn_game(dir: &Path, exe_path: &Path, auto_login: bool, gamescope: bool, ga
         //                                 -W 1920 -H 1080 -w 800 -h 600"
         //   AVATAR_VK_ICD=/path/icd.json  sets VK_ICD_FILENAMES (pin the Vulkan driver)
         // We always append `-f` (fullscreen) and the wine invocation.
+        // PROTON (Linux): run the game through umu-run + Proton (DXVK) instead of raw wine. Old
+        // Virtools/DirectX games render far more reliably on DXVK, and Proton presents consistent
+        // monitor coordinates (so the seamless cover lands on the right screen). The game files stay
+        // in place — umu runs the exe via the Z:/X: mapping and uses a dedicated Proton prefix for C:.
+        // Takes precedence over gamescope/wine when the Proton toggle is on.
+        #[cfg(target_os = "linux")]
+        if proton {
+            if !on_path("umu-run") {
+                return Err("Proton is enabled but umu-run isn't installed (install umu-launcher).".into());
+            }
+            let pfx = proton_prefix();
+            if let Some(p) = &pfx { let _ = fs::create_dir_all(p); }
+            let pp = find_proton_path();
+            // Fullscreen for this windowed client comes from gamescope SCALING the game to the screen
+            // (the game itself only makes a fixed-size window). gamescope+Proton/DXVK nests cleanly on
+            // Wayland (gamescope+raw-wine does NOT — it aborts), so we only do this on the Proton path.
+            // --backend wayland is required under a Wayland compositor (the default backend aborts).
+            if fullscreen && on_path("gamescope") {
+                // setsid so gamescope owns its session (closing the launcher won't kill the match).
+                let mut cmd = Command::new("setsid");
+                cmd.arg("gamescope").current_dir(dir);
+                if std::env::var_os("WAYLAND_DISPLAY").is_some() { cmd.args(["--backend", "wayland"]); }
+                cmd.args(["-w", &width.max(640).to_string(), "-h", &height.max(480).to_string(), "-S", "fit", "-f"]);
+                cmd.arg("--").arg("env");
+                cmd.arg("GAMEID=umu-avatar");
+                cmd.arg(format!("AVATAR_SKIP_MENUS={skip_env}"));
+                cmd.arg(format!("AVATAR_AUTO_LOGIN={auto_login_env}"));
+                if let Some(p) = &pfx { cmd.arg(format!("WINEPREFIX={}", p.display())); }
+                if let Some(p) = &pp { cmd.arg(format!("PROTONPATH={}", p.display())); }
+                if let Ok(icd) = std::env::var("AVATAR_VK_ICD") { cmd.arg(format!("VK_ICD_FILENAMES={icd}")); }
+                cmd.arg("umu-run").arg(exe_path);
+                cmd.spawn().map_err(|e| format!("launch via gamescope+Proton: {e}"))?;
+                return Ok(None);   // detached via setsid — its exit can't be tracked
+            }
+            // Windowed Proton (no fullscreen): run umu-run directly so we can wait on it.
+            let mut cmd = Command::new("umu-run");
+            cmd.arg(exe_path).current_dir(dir);
+            cmd.env("AVATAR_SKIP_MENUS", skip_env);
+            cmd.env("AVATAR_AUTO_LOGIN", auto_login_env);
+            cmd.env("GAMEID", "umu-avatar");                 // non-Steam GAMEID for umu
+            if let Some(p) = pfx { cmd.env("WINEPREFIX", p); }
+            if let Some(p) = pp { cmd.env("PROTONPATH", p); }
+            if let Ok(icd) = std::env::var("AVATAR_VK_ICD") { cmd.env("VK_ICD_FILENAMES", icd); }
+            let child = cmd.spawn().map_err(|e|
+                format!("launch via Proton/umu-run ({}): {e}", exe_path.display()))?;
+            return Ok(Some(child));
+        }
+
         #[cfg(target_os = "linux")]
         {
             let env_want = std::env::var("AVATAR_GAMESCOPE").unwrap_or_default().to_ascii_lowercase();
@@ -998,7 +1082,10 @@ async fn play(settings: Settings, windowed: bool, username: Option<String>, tick
     // gamescope (that's what gives a centered, clickable game on Wayland — wine's own
     // exclusive fullscreen renders tiny/top-left and breaks the cursor).
     let want_fullscreen = s.fullscreen;
-    if s.gamescope { s.fullscreen = false; }
+    // The game runs WINDOWED whenever gamescope does the fullscreen scaling: the wine+gamescope path,
+    // AND the Proton path when fullscreen is on (Proton wraps umu-run in gamescope to fill the screen,
+    // since this windowed client can't fullscreen itself). gamescope then scales it up.
+    if (s.gamescope && !s.proton) || (s.proton && want_fullscreen) { s.fullscreen = false; }
     write_config(&dir, &s)?;
     // Identity: when skipping menus AND logged in, pass the launcher's auth ticket to arena_link
     // (it forwards it to the game server, which loads this account's real character). Otherwise
@@ -1021,7 +1108,7 @@ async fn play(settings: Settings, windowed: bool, username: Option<String>, tick
     // Config.ini (hardcoded 800x600 top-left), so only use it as a last-resort fallback.
     let windowed_exe = dir.join("AvatarMP_Windowed.exe");
     let target = if windowed_exe.is_file() { windowed_exe } else { dir.join("AvatarMP.exe") };
-    let child = spawn_game(&dir, &target, logged_in, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen)?;
+    let child = spawn_game(&dir, &target, logged_in, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen, s.proton)?;
     // Block (on this spawn_blocking thread) until the game exits, so the JS `await invoke('play')`
     // resolves only when the match is actually over — that's what keeps PLAY disabled (no second
     // instance) and re-arms it afterwards. `None` = detached (gamescope) → return right away.

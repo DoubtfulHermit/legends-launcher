@@ -11,9 +11,9 @@ const FALLBACK = {
   load: { found:true, game_dir:'(preview)', version:'1.12', native:[1920,1080],
     cloned:true, needs_clone:false, original_dir:'(preview)',
     resolutions:[[1024,768],[1280,960],[1440,1080],[1600,1200],[1920,1440]],
-    hd_available:true, gamescope_available:false,
+    hd_available:true, gamescope_available:false, proton_available:true,
     settings:{ host:'', room:'', queue:4, fullscreen:true, width:1440, height:1080,
-               hd_textures:false, gamescope:false, gamescope_args:'', skip_menu:false } },
+               hd_textures:false, gamescope:false, gamescope_args:'', skip_menu:false, proton:false } },
   status: { reachable:true, gateway:true, database:true, game_server:true, players:27 },
   gw_login: { ok:true, screen_name:null }, gw_ticket: { ok:false }, gw_ticket_session: { ok:false },
   check_updates: { ok:true }, sync: { ok:true, updated:[], failed:[] },
@@ -59,7 +59,7 @@ const SAVE_DEFAULTS = { element:'fire', session:null,
   match:{ bot:'korra', diff:'medium', tsize:2 },
   settings:{
     queue:4, room:'', server:DEFAULT_SERVER, res:'1440x1080',
-    hd:false, fullscreen:true, skip_menu:false, gamescope:false, gamescope_args:'' } };
+    hd:false, fullscreen:true, skip_menu:false, gamescope:false, gamescope_args:'', proton:false } };
 function loadSave(){
   try{ const j = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}');
     return { ...SAVE_DEFAULTS, ...j,
@@ -72,7 +72,7 @@ let SAVE = loadSave();
 function persist(){ try{ localStorage.setItem(SAVE_KEY, JSON.stringify(SAVE)); }catch{} }
 
 // backend capability flags (from `load`)
-let found = false, hdAvailable = false, gsAvailable = false;
+let found = false, hdAvailable = false, gsAvailable = false, ptAvailable = false;
 let needsClone = false, cloning = false;   // first-run patched-clone setup
 let native = [0,0], resolutions = [], appVersion = '';
 let sessionPass = '';   // in-memory only, for minting the seamless login ticket
@@ -589,8 +589,10 @@ function syncDrawer(){
   $('stGs').classList.toggle('on', !!st.gamescope);
   $('stGsArgs').value=st.gamescope_args||'';
   $('stGsArgs').hidden = !(gsAvailable && st.gamescope);
+  $('stProton').classList.toggle('on', !!st.proton);
   $('hdRow').hidden = !hdAvailable;
   $('gsRow').hidden = !gsAvailable;
+  $('ptRow').hidden = !ptAvailable;
 }
 function openDrawer(){ syncDrawer(); drawer.classList.add('open'); scrim.classList.add('show'); }
 function closeDrawer(){ drawer.classList.remove('open'); scrim.classList.remove('show'); }
@@ -685,6 +687,7 @@ $('stFs').addEventListener('click', ()=>{ SAVE.settings.fullscreen=!SAVE.setting
 $('stSkip').addEventListener('click', ()=>{ SAVE.settings.skip_menu=!SAVE.settings.skip_menu; persist(); syncDrawer(); });
 $('stGs').addEventListener('click', ()=>{ if(!gsAvailable) return; SAVE.settings.gamescope=!SAVE.settings.gamescope; persist(); syncDrawer(); });
 $('stGsArgs').addEventListener('input', e=>{ SAVE.settings.gamescope_args=e.target.value; persist(); });
+$('stProton').addEventListener('click', ()=>{ if(!ptAvailable) return; SAVE.settings.proton=!SAVE.settings.proton; persist(); syncDrawer(); });
 // HD textures swap immediately (the engine only reads them at startup → next launch)
 $('stHd').addEventListener('click', async ()=>{
   if(!hdAvailable) return;
@@ -725,7 +728,7 @@ function gather(){
   return { host:(st.server||'').trim(), room:(st.room||'').trim(), queue:st.queue,
            fullscreen:!!st.fullscreen, width:w||1440, height:h||1080, hd_textures:!!st.hd,
            gamescope:!!st.gamescope, gamescope_args:(st.gamescope_args||'').trim(),
-           skip_menu:!!st.skip_menu };
+           skip_menu:!!st.skip_menu, proton:!!st.proton };
 }
 // PLAY morphs into a status pill (#prog) — reused for the experimental Skip-menus orchestration.
 function showProg(text, pct){ $('play').style.display='none'; $('prog').style.display='block';
@@ -875,7 +878,7 @@ async function refresh(){
   let r; try{ r=await invoke('load'); }catch{ toast('Launcher backend unavailable.','err'); return; }
   if(!r) return;
   found=!!r.found; native=r.native||[0,0]; resolutions=r.resolutions||[];
-  hdAvailable=!!r.hd_available; gsAvailable=!!r.gamescope_available;
+  hdAvailable=!!r.hd_available; gsAvailable=!!r.gamescope_available; ptAvailable=!!r.proton_available;
   if(r.version){ appVersion=r.version; $('version').textContent=`Legends Awakened · v${r.version}`; $('drawerVer').textContent=`Launcher v${r.version}`; }
   // reconcile authoritative game settings from the backend (keep element + session local)
   const s=r.settings||{};
@@ -887,7 +890,8 @@ async function refresh(){
     fullscreen:('fullscreen'in s)?!!s.fullscreen:SAVE.settings.fullscreen,
     skip_menu:('skip_menu'in s)?!!s.skip_menu:SAVE.settings.skip_menu,
     gamescope:('gamescope'in s)?!!s.gamescope:SAVE.settings.gamescope,
-    gamescope_args:s.gamescope_args??SAVE.settings.gamescope_args };
+    gamescope_args:s.gamescope_args??SAVE.settings.gamescope_args,
+    proton:('proton'in s)?!!s.proton:SAVE.settings.proton };
   persist();
   buildResolutions(); syncDrawer();
   $('liServer').value = SAVE.session ? SAVE.session.server : SAVE.settings.server;
