@@ -895,7 +895,11 @@ async function checkLauncherUpdate(){
   let r; try{ r=await invoke('check_self_update'); }catch{ return; }
   if(r && r.available){
     updateMode='launcher';
-    $('updateBody').innerHTML=`A newer launcher is available — <b>v${r.version}</b>${appVersion?` (you have v${appVersion})`:''}. Install it now? The launcher will restart.`;
+    // The pacman path pops a graphical password prompt to authorize the install; tell the user.
+    const tail = r.via==='pacman'
+      ? `Install it now? You'll get a password prompt to authorize the package install, then the launcher restarts.`
+      : `Install it now? The launcher will restart.`;
+    $('updateBody').innerHTML=`A newer launcher is available — <b>v${r.version}</b>${appVersion?` (you have v${appVersion})`:''}. ${tail}`;
     resetModal(); $('updateNow').textContent='Update'; $('updateModal').setAttribute('aria-hidden','false');
   }
 }

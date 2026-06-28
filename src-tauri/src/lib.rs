@@ -904,11 +904,88 @@ async fn check_updates(host: String) -> UpdateCheck {
 #[derive(Serialize, Default)]
 struct SelfUpdateOut { updated: bool, version: Option<String>, error: Option<String> }
 
+// Compare dotted versions ("0.1.30" > "0.1.29"). Lenient: a leading `v` and any
+// non-numeric suffix on a component are ignored.
+#[cfg(target_os = "linux")]
+fn version_gt(remote: &str, local: &str) -> bool {
+    let parse = |s: &str| s.trim().trim_start_matches('v').split('.')
+        .map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse::<u64>().unwrap_or(0))
+        .collect::<Vec<u64>>();
+    let (r, l) = (parse(remote), parse(local));
+    for i in 0..r.len().max(l.len()) {
+        let (rv, lv) = (r.get(i).copied().unwrap_or(0), l.get(i).copied().unwrap_or(0));
+        if rv != lv { return rv > lv; }
+    }
+    false
+}
+
+// Was the launcher installed from the Arch `-bin` package? Only then can we drive an
+// in-app update via `pkexec pacman -U` (AppImage/portable installs update elsewhere).
+#[cfg(target_os = "linux")]
+fn pacman_pkg_installed() -> bool {
+    std::process::Command::new("pacman")
+        .args(["-Q", "legends-awakened-launcher-bin"])
+        .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+        .status().map(|s| s.success()).unwrap_or(false)
+}
+
+// The version GitHub advertises as latest (the Tauri updater's latest.json — same source
+// the Windows updater uses), with any leading `v` stripped.
+#[cfg(target_os = "linux")]
+fn fetch_latest_version() -> Option<String> {
+    let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(15)).build();
+    let resp = agent.get("https://github.com/DoubtfulHermit/legends-launcher/releases/latest/download/latest.json").call().ok()?;
+    let v: serde_json::Value = resp.into_json().ok()?;
+    v.get("version").and_then(|x| x.as_str()).map(|s| s.trim_start_matches('v').to_string())
+}
+
+// In-app update for the Arch `-bin` install: download the prebuilt package asset from the
+// matching GitHub release and install it with `pkexec pacman -U` (a graphical polkit auth
+// prompt). pacman replaces /usr/bin/launcher; the running process keeps its old inode until
+// the caller restarts. No-op if already current or not a pacman install.
+#[cfg(target_os = "linux")]
+fn linux_pkg_update() -> SelfUpdateOut {
+    use std::io::Read;
+    if !pacman_pkg_installed() {
+        return SelfUpdateOut { error: Some("Not a pacman install — update with your package manager.".into()), ..Default::default() };
+    }
+    let ver = match fetch_latest_version() {
+        Some(v) => v,
+        None => return SelfUpdateOut { error: Some("Couldn't reach the update server.".into()), ..Default::default() },
+    };
+    if !version_gt(&ver, env!("CARGO_PKG_VERSION")) { return SelfUpdateOut::default(); }
+    let url = format!("https://github.com/DoubtfulHermit/legends-launcher/releases/download/v{v}/legends-awakened-launcher-bin-{v}-1-x86_64.pkg.tar.zst", v = ver);
+    let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(180)).build();
+    let mut buf = Vec::new();
+    match agent.get(&url).call() {
+        Ok(resp) => if resp.into_reader().read_to_end(&mut buf).is_err() || buf.is_empty() {
+            return SelfUpdateOut { error: Some("Download failed.".into()), ..Default::default() };
+        },
+        Err(e) => return SelfUpdateOut { error: Some(format!("Download failed: {e}")), ..Default::default() },
+    }
+    let path = std::env::temp_dir().join(format!("legends-awakened-launcher-bin-{ver}.pkg.tar.zst"));
+    if std::fs::write(&path, &buf).is_err() {
+        return SelfUpdateOut { error: Some("Couldn't write the package to disk.".into()), ..Default::default() };
+    }
+    let status = std::process::Command::new("pkexec")
+        .args(["pacman", "-U", "--noconfirm"]).arg(&path).status();
+    let _ = std::fs::remove_file(&path);
+    match status {
+        Ok(s) if s.success() => SelfUpdateOut { updated: true, version: Some(ver), error: None },
+        Ok(s) if matches!(s.code(), Some(126) | Some(127)) =>
+            SelfUpdateOut { error: Some("Update cancelled — authorization was dismissed.".into()), ..Default::default() },
+        Ok(s) => SelfUpdateOut { error: Some(format!("Install failed (pacman exit {}).", s.code().unwrap_or(-1))), ..Default::default() },
+        Err(_) => SelfUpdateOut { error: Some("pkexec not found — install polkit, or update via the AUR.".into()), ..Default::default() },
+    }
+}
+
 #[tauri::command]
 async fn self_update(app: tauri::AppHandle) -> SelfUpdateOut {
-    // Linux updates via the package manager — never self-install (would call dpkg). See check_self_update.
+    // Linux: drive the pacman `-bin` package via `pkexec pacman -U` (graphical auth). Other
+    // Linux installs fall through linux_pkg_update's "not a pacman install" guard.
     #[cfg(target_os = "linux")]
-    { let _ = &app; return SelfUpdateOut { error: Some("On Linux, update with your package manager (pacman / apt / AUR).".into()), ..Default::default() }; }
+    { let _ = &app; return tauri::async_runtime::spawn_blocking(linux_pkg_update).await
+        .unwrap_or_else(|_| SelfUpdateOut { error: Some("update task failed".into()), ..Default::default() }); }
     #[cfg(not(target_os = "linux"))]
     {
     use tauri_plugin_updater::UpdaterExt;
@@ -930,17 +1007,24 @@ async fn self_update(app: tauri::AppHandle) -> SelfUpdateOut {
 }
 
 #[derive(Serialize, Default)]
-struct SelfUpdateCheck { available: bool, version: Option<String> }
+struct SelfUpdateCheck { available: bool, version: Option<String>, via: Option<String> }
 
 // Is a newer signed launcher available? (checks the updater endpoint, installs nothing —
 // the UI prompts, then calls self_update.) Silent no-op if the endpoint is unreachable.
 #[tauri::command]
 async fn check_self_update(app: tauri::AppHandle) -> SelfUpdateCheck {
-    // Linux installs are owned by the package manager (pacman / apt / AUR). The in-app
-    // updater would download the .deb and shell out to `dpkg` (absent on Arch) to replace
-    // a package-managed binary — so never offer a self-update on Linux. Windows (NSIS) only.
+    // Linux: offer the in-app updater only for the pacman `-bin` install (driven by
+    // `pkexec pacman -U`). Compare GitHub's advertised version to ours; other installs
+    // (AppImage/portable) return "none" and update elsewhere. Windows uses the plugin below.
     #[cfg(target_os = "linux")]
-    { let _ = &app; return SelfUpdateCheck::default(); }
+    { let _ = &app; return tauri::async_runtime::spawn_blocking(|| {
+        if !pacman_pkg_installed() { return SelfUpdateCheck::default(); }
+        match fetch_latest_version() {
+            Some(v) if version_gt(&v, env!("CARGO_PKG_VERSION")) =>
+                SelfUpdateCheck { available: true, version: Some(v), via: Some("pacman".into()) },
+            _ => SelfUpdateCheck::default(),
+        }
+    }).await.unwrap_or_default(); }
     #[cfg(not(target_os = "linux"))]
     {
         use tauri_plugin_updater::UpdaterExt;
