@@ -62,7 +62,16 @@ fn cfg_home() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from))
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
 }
-fn is_game_dir(p: &Path) -> bool { p.join("Config.ini").is_file() }
+// A real game dir is identified by the GAME EXECUTABLE — NOT Config.ini. The launcher itself writes
+// Config.ini, and a fresh install doesn't have one until the game first runs. Keying off Config.ini
+// caused two failures when the launcher was installed before the game:
+//   1. a half-finished AppData clone (Config.ini written, game files not yet copied) looked "valid",
+//      so resolve_game_dir() locked onto the broken clone and never re-synced ("couldn't sync it up");
+//   2. a freshly-installed game (exe present, no Config.ini yet) wasn't detected at all.
+// The executable is the reliable signal: present in any real install, absent in a partial clone.
+fn is_game_dir(p: &Path) -> bool {
+    p.join("AvatarMP_Windowed.exe").is_file() || p.join("AvatarMP.exe").is_file()
+}
 
 // ── patched-clone model (see docs/handoff_patching.md) ───────────────────────
 // We never patch the player's ORIGINAL install (often in Program Files → needs
@@ -104,7 +113,26 @@ fn resolve_original_dir() -> Option<PathBuf> {
             if is_game_dir(&p) { return Some(p); }
         }
     }
+    // Auto-detect a freshly-installed game in the standard install location, so installing the
+    // launcher BEFORE the game self-heals (no manual "locate" needed once the game is present).
+    for c in candidate_install_dirs() {
+        if is_game_dir(&c) { remember_game_dir(&c); return Some(c); }
+    }
     None
+}
+// Standard install locations for the NickOnline "Avatar - Legends of the Arena" game (best-effort).
+fn candidate_install_dirs() -> Vec<PathBuf> {
+    const GAME: &str = "NickOnline/Avatar - Legends of the Arena";
+    let mut v = Vec::new();
+    for var in ["ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA", "ProgramW6432"] {
+        if let Some(pf) = std::env::var_os(var) { v.push(PathBuf::from(pf).join(GAME)); }
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let h = PathBuf::from(home);
+        v.push(h.join(".wine/drive_c/Program Files (x86)").join(GAME));
+        v.push(h.join("Games").join(GAME));
+    }
+    v
 }
 fn remember_game_dir(p: &Path) {
     if let Some(store) = config_store() {
@@ -166,6 +194,13 @@ fn ensure_clone(on: &dyn Fn(u32, u32, &str)) -> Result<PathBuf, String> {
         if let Ok(prev) = fs::read_to_string(&meta) {
             if prev.trim() == fp { return Ok(dst); }   // already current
         }
+    } else if dst.exists() {
+        // A previous clone exists but is NOT a valid game dir (a half-finished/broken copy — the
+        // exact "couldn't sync it up" state). Clear it so the re-copy below starts clean instead of
+        // merging fresh files onto the broken remnants. Safe: the clone is regenerable; saves live
+        // server-side (gateway player_cells), not in here.
+        let _ = fs::remove_file(&meta);
+        let _ = fs::remove_dir_all(&dst);
     }
     if let Some(parent) = dst.parent() { let _ = fs::create_dir_all(parent); }
     let total = count_files(&src);
