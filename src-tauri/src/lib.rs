@@ -1030,7 +1030,7 @@ async fn check_self_update(app: tauri::AppHandle) -> SelfUpdateCheck {
         use tauri_plugin_updater::UpdaterExt;
         if let Ok(updater) = app.updater() {
             if let Ok(Some(u)) = updater.check().await {
-                return SelfUpdateCheck { available: true, version: Some(u.version) };
+                return SelfUpdateCheck { available: true, version: Some(u.version), via: None };
             }
         }
         SelfUpdateCheck::default()
