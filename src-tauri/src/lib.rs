@@ -1394,9 +1394,16 @@ async fn session_login(host: String, username: String, password: String) -> serd
 }
 
 #[tauri::command]
-async fn session_ping(host: String, token: String) -> serde_json::Value {
+async fn session_ping(host: String, token: String, status: Option<String>) -> serde_json::Value {
+    // Presence telemetry: report what the player is doing + the launcher version so the gateway's
+    // /session/ping can show it in the admin Command view. Back-compat: the gateway ignores the body
+    // on older builds, and an empty status is fine.
+    let body = serde_json::json!({
+        "status": status.unwrap_or_default(),
+        "version": env!("CARGO_PKG_VERSION"),
+    });
     tauri::async_runtime::spawn_blocking(move ||
-        gw_json(&host, "POST", "/session/ping", Some(&token), serde_json::json!({}))
+        gw_json(&host, "POST", "/session/ping", Some(&token), body)
     ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
 }
 

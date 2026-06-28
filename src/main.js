@@ -214,7 +214,7 @@ let presenceTimer = null;
 function startPresence(){
   if(presenceTimer) return;
   const ping = () => { const t=_tok(); if(t && !document.hidden)
-    invoke('session_ping',{ host:_srv(), token:t }).catch(()=>{}); };
+    invoke('session_ping',{ host:_srv(), token:t, status:_status }).catch(()=>{}); };
   ping(); presenceTimer = setInterval(ping, 30000);
 }
 // thin invoke that injects host + token and swallows transport errors (null on signed-out/fail)
@@ -600,8 +600,8 @@ function syncDrawer(){
   $('gsRow').hidden = !gsAvailable;
   $('ptRow').hidden = !ptAvailable;
 }
-function openDrawer(){ syncDrawer(); drawer.classList.add('open'); scrim.classList.add('show'); }
-function closeDrawer(){ drawer.classList.remove('open'); scrim.classList.remove('show'); }
+function openDrawer(){ syncDrawer(); drawer.classList.add('open'); scrim.classList.add('show'); if(!_inGame) setStatus('in settings'); }
+function closeDrawer(){ drawer.classList.remove('open'); scrim.classList.remove('show'); if(!_inGame) setStatus('in lobby'); }
 $('navSettings').addEventListener('click', e=>{ e.preventDefault(); openDrawer(); });
 
 // ── view router: Home / Match / Training / Ranks ────────────────────────────────
@@ -786,7 +786,11 @@ function gather(){
 function showProg(text, pct){ $('play').style.display='none'; $('prog').style.display='block';
   $('progText').textContent=text; $('progFill').style.width=(pct||0)+'%'; $('progPct').textContent = pct!=null?pct+'%':''; }
 let _inGame=false;   // true while a launched game is running → PLAY stays disabled (no double-launch)
-function resetPlay(){ _inGame=false; $('prog').style.display='none'; $('play').style.display='flex'; $('play').disabled=false; updateCTA(); }
+// Presence telemetry: a short label of what the player is doing, sent on each keep-alive ping so the
+// gateway admin Command view shows it. setStatus() updates it at navigation points.
+let _status='in lobby';
+function setStatus(s){ _status = s || 'in lobby'; }
+function resetPlay(){ _inGame=false; setStatus('in lobby'); $('prog').style.display='none'; $('play').style.display='flex'; $('play').disabled=false; updateCTA(); }
 
 
 // Arm the seamless ("Skip-menus") launch with a one-time game-login ticket so the game
@@ -848,7 +852,7 @@ async function play(roomOverride, queueOverride){
     // stall the webview; being redone with a small PNG. The DLL falls back to the GDI/Cinzel card.)
     const launched = invoke('play',{ settings, windowed:!settings.fullscreen, username, ticket, element, party });
     toast(ticket ? 'Logging you in…' : 'Launching…','ok');
-    _inGame=true; setPlayLabel('IN GAME');
+    _inGame=true; setStatus('in match'); setPlayLabel('IN GAME');
     setTimeout(()=>{ if(w && _inGame) w.minimize(); }, 1500);   // let the game grab focus, then drop the launcher
     await launched;                                             // ← the game has now closed
     if(w){ try{ await w.unminimize(); await w.setFocus(); }catch{} }   // bring the launcher back, ready to go again
@@ -1088,7 +1092,7 @@ async function restoreSession(){
   showChip(SAVE.session.name); loginEl.classList.add('hide');
   const tok = SAVE.session.token;
   if(tok){
-    try{ const r=await invoke('session_ping',{ host:SAVE.settings.server, token:tok });
+    try{ const r=await invoke('session_ping',{ host:SAVE.settings.server, token:tok, status:_status });
       if(r && r.ok===false && /signed in/.test(r.error||'')){
         SAVE.session.token=null; persist();           // expired — keep the name for a one-tap re-sign-in
         $('liUser').value=SAVE.session.name; loginEl.classList.remove('hide');
@@ -1157,9 +1161,9 @@ function _replayEl(){
   _rv.addEventListener('click', e=>{ if(e.target===_rv) closeReplay(); });
   return _rv;
 }
-function closeReplay(){ if(_rvState){ cancelAnimationFrame(_rvState.raf); _rvState=null; } if(_rv) _rv.hidden=true; }
+function closeReplay(){ if(_rvState){ cancelAnimationFrame(_rvState.raf); _rvState=null; } if(_rv) _rv.hidden=true; if(!_inGame) setStatus('in lobby'); }
 async function openReplay(uid){
-  const el=_replayEl(); el.hidden=false; closeMenus();
+  const el=_replayEl(); el.hidden=false; closeMenus(); if(!_inGame) setStatus('watching a replay');
   el.querySelector('#rvMeta').textContent='Loading replay…';
   let r; try{ r=await invoke('match_replay',{ host:_srv(), uid }); }catch{ r=null; }
   if(!r || !r.ok || !(r.frames||[]).length){ el.querySelector('#rvMeta').textContent='No replay data for this match.'; return; }
