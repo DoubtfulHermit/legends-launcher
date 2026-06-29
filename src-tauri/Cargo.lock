@@ -1921,7 +1921,7 @@ dependencies = [
 
 [[package]]
 name = "launcher"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "png 0.17.16",
  "serde",

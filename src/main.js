@@ -94,7 +94,10 @@ let particles = [], currentElement = 'fire'; const MAX_PARTICLES = 70;
 // the same wall-clock time) and keeps the aspect ratio (proportional shrink, no distortion).
 function resizeCanvas(){
   const cw = Math.max(1, app.clientWidth), ch = Math.max(1, app.clientHeight);
-  const scale = Math.min(1, 1280 / cw);   // only shrinks the buffer once the window exceeds 1280px
+  // Cap the backing store at ~1120px wide (the pre-1456 window size). WebKitGTK software-composites
+  // this canvas every frame, so a bigger buffer steals GPU/CPU — keeping it at the old size means the
+  // 30%-bigger window doesn't make the launcher heavier (CSS still stretches it to fill, same look).
+  const scale = Math.min(1, 1120 / cw);
   canvas.width = Math.round(cw * scale);
   canvas.height = Math.round(ch * scale);
 }
@@ -724,7 +727,10 @@ function onCTA(){
 // ── Match modes (Quick / Ranked / Custom) ───────────────────────────────────────
 function setPlayMode(mode){
   _playMode = (['quick','ranked','custom'].includes(mode)) ? mode : 'quick';
-  SAVE.settings.playMode = _playMode; saveSettings();
+  // persist() ONLY — playMode is a launcher-UI setting, NOT a game file. Using saveSettings() here
+  // scheduled a debounced invoke('save') that overwrote arena_link.ini's room with the saved (empty)
+  // code ~300ms later, clobbering a transient Training/bot code mid-launch. (Bug fix: empty bot queue.)
+  SAVE.settings.playMode = _playMode; persist();
   document.querySelectorAll('#modeList .mode-card').forEach(c=>c.classList.toggle('on', c.dataset.mode===_playMode));
   for(const k of ['quick','ranked','custom']){ const p=$('pane-'+k); if(p) p.classList.toggle('on', k===_playMode); }
   if(_playMode==='ranked') loadMyRank();
@@ -994,6 +1000,9 @@ async function play(roomOverride, queueOverride){
   const transient = roomOverride!=null;
   if(roomOverride!=null) settings.room=roomOverride;
   if(queueOverride!=null) settings.queue=queueOverride;
+  // Cancel any pending debounced save: it would write the SAVED room over arena_link.ini ~300ms into
+  // the game's startup, clobbering a transient bot/party/ranked room code before the game reads it.
+  clearTimeout(_saveT);
   // Seamless identity: mint a ticket from the signed-in session so the game loads the REAL
   // character. Don't silently launch unarmed — warn so the player knows it'll be a manual login.
   let username=null, ticket=null;
@@ -1026,9 +1035,11 @@ async function play(roomOverride, queueOverride){
     const launched = invoke('play',{ settings, windowed:!settings.fullscreen, username, ticket, element, party });
     toast(ticket ? 'Logging you in…' : 'Launching…','ok');
     _inGame=true; setStatus('in match'); setPlayLabel('IN GAME');
+    stopParticles();   // free the GPU/CPU NOW (don't wait for the minimize) so the game's startup isn't starved
     setTimeout(()=>{ if(w && _inGame) w.minimize(); }, 1500);   // let the game grab focus, then drop the launcher
     await launched;                                             // ← the game has now closed
     if(w){ try{ await w.unminimize(); await w.setFocus(); }catch{} }   // bring the launcher back, ready to go again
+    startParticles();  // game closed → resume the background animation
   }catch(e){ toast(String(e),'err'); }
   // Restore the saved (normal) room in arena_link.ini after a one-off launch (training/party), so the
   // transient bot/party code never persists as the match room. gather() reads SAVE.settings (untouched

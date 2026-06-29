@@ -1223,6 +1223,7 @@ fn spawn_game(dir: &Path, exe_path: &Path, auto_login: bool, gamescope: bool, ga
                 cmd.args(["-w", &width.max(640).to_string(), "-h", &height.max(480).to_string(), "-S", "fit", "-f"]);
                 cmd.arg("--").arg("env");
                 cmd.arg("GAMEID=umu-avatar");
+                cmd.arg("AVATAR_UNDER_GAMESCOPE=1");   // tell the DLL it's in gamescope's isolated session
                 cmd.arg(format!("AVATAR_SKIP_MENUS={skip_env}"));
                 cmd.arg(format!("AVATAR_AUTO_LOGIN={auto_login_env}"));
                 if let Some(p) = &pfx { cmd.arg(format!("WINEPREFIX={}", p.display())); }
