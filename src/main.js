@@ -163,9 +163,11 @@ function showChip(name){
 }
 acct.addEventListener('click', e=>{
   e.stopPropagation();
-  const s=SAVE.session;
-  $('amName').textContent = s ? s.name : 'Guest';
-  $('amServer').textContent = s ? s.server : '';
+  const s=SAVE.session, name=(s&&s.name)||'';
+  $('amName').textContent = name || 'Guest';
+  $('amServer').textContent = s ? 'Online' : 'Signed out';
+  const av=$('amAv'); if(av){ av.textContent = s ? initials(name) : '?'; av.style.setProperty('--ah', nameHue(s?name:'?')); }
+  acctMenu.classList.toggle('signedout', !s);
   acctMenu.classList.toggle('open');
 });
 document.addEventListener('click', ()=>acctMenu.classList.remove('open'));
@@ -684,6 +686,9 @@ function buildResolutions(){
 function syncDrawer(){
   const st=SAVE.settings;
   const signedIn=!!(SAVE.session && SAVE.session.name);
+  const dm=$('drMe'); if(dm){ dm.hidden=!signedIn;
+    if(signedIn){ const nm=SAVE.session.name; $('drMeName').textContent=nm; $('drMeState').textContent='Online';
+      const a=$('drMeAv'); a.textContent=initials(nm); a.style.setProperty('--ah', nameHue(nm)); } }
   $('acctSec').hidden=!signedIn; $('acctBox').hidden=!signedIn;
   if(!signedIn){ $('apDel').hidden=true; $('apMsg').textContent=''; }
   $('stServer').value=st.server||'';
@@ -1272,13 +1277,15 @@ function renderBoard(){
   for(const r of rows){
     const row = document.createElement('div'); row.className = 'lb-row'+(r.rank===1?' top':'');
     const rank = document.createElement('span'); rank.className='lb-rank'; rank.textContent=r.rank;
+    const av = document.createElement('span'); av.className='fr-av lb-av';    // social-idiom hued avatar
+    av.style.setProperty('--ah', nameHue(r.name)); av.textContent=initials(r.name);
     const ico = document.createElementNS('http://www.w3.org/2000/svg','svg'); ico.setAttribute('class','el el-'+r.nation+' lb-el');
     const use = document.createElementNS('http://www.w3.org/2000/svg','use'); use.setAttribute('href','#el-'+r.nation); ico.appendChild(use);
     const nm = document.createElement('span'); nm.className='lb-name'; nm.textContent=r.name;   // textContent → no HTML injection
     if(r.wins!=null && SAVE.board.mode!=='dominance'){ const w=document.createElement('span'); w.className='lb-w';
       w.textContent=r.wins+'W'; nm.appendChild(w); }
     const val = document.createElement('span'); val.className='lb-val'; val.textContent=r.value;
-    row.append(rank, ico, nm, val); frag.appendChild(row);
+    row.append(rank, av, ico, nm, val); frag.appendChild(row);
     if(SAVE.session && r.name===SAVE.session.name) row.classList.add('me');
   }
   host.appendChild(frag);
@@ -1705,6 +1712,7 @@ if(!HAS_TAURI && /[?&]demo/.test(location.search)){
       else if(state==='custom'){ setView('match'); setPlayMode('custom'); }
       else if(state==='help') $('cbHow').click();
       else if(state==='account') openDrawer();
+      else if(state==='acctmenu') acct.click();
     });
   }
 }

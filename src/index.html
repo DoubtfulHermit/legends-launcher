@@ -80,15 +80,15 @@
         <div class="play-grid">
           <aside class="mode-list" id="modeList">
             <button class="mode-card on" data-mode="quick">
-              <span class="mode-ic">&#9876;</span>
+              <span class="mode-ic"><svg class="ic" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
               <span class="mode-tx"><b>Quick Match</b><small>Open matchmaking</small></span>
             </button>
             <button class="mode-card" data-mode="ranked">
-              <span class="mode-ic">&#9733;</span>
+              <span class="mode-ic"><svg class="ic" viewBox="0 0 24 24"><polygon points="12 2 15.1 8.6 22 9.3 17 14.1 18.2 21 12 17.5 5.8 21 7 14.1 2 9.3 8.9 8.6 12 2"/></svg></span>
               <span class="mode-tx"><b>Ranked 1v1</b><small>Climb the ladder</small></span>
             </button>
             <button class="mode-card" data-mode="custom">
-              <span class="mode-ic">&#9783;</span>
+              <span class="mode-ic"><svg class="ic" viewBox="0 0 24 24"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg></span>
               <span class="mode-tx"><b>Custom Room</b><small>Private match by code</small></span>
             </button>
           </aside>
@@ -232,12 +232,17 @@
     </div>
   </div>
 
-  <!-- account dropdown -->
+  <!-- account dropdown — same idiom as the social rail (profile header + icon rows) -->
   <div class="acct-menu" id="acctMenu">
-    <div class="who"><b id="amName">Guest</b><small id="amServer"></small></div>
-    <button id="amCareer">My career</button>
-    <button id="amSettings">Settings</button>
-    <button class="danger" id="amSignout">Sign out</button>
+    <div class="am-head" id="amHead">
+      <span class="fr-av" id="amAv" style="--ah:30">?</span>
+      <span class="am-dot"></span>
+      <div class="am-id"><b id="amName">Guest</b><small id="amServer">Offline</small></div>
+    </div>
+    <button id="amCareer"><svg class="ic" viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="8" r="5"/><path d="M8 13l-2 8 6-3 6 3-2-8"/></svg><span>My career</span></button>
+    <button id="amSettings"><svg class="ic" viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>Settings</span></button>
+    <div class="am-sep"></div>
+    <button class="danger" id="amSignout"><svg class="ic" viewBox="0 0 24 24" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>Sign out</span></button>
   </div>
 
   <!-- settings drawer -->
@@ -245,6 +250,11 @@
   <aside class="drawer" id="drawer">
     <button class="x" id="drawerClose">&#10005;</button>
     <h3>Settings</h3>
+    <div class="dr-me" id="drMe" hidden>
+      <span class="fr-av" id="drMeAv" style="--ah:30">?</span>
+      <span class="dr-me-dot"></span>
+      <div class="dr-me-id"><b id="drMeName">Guest</b><small id="drMeState">Offline</small></div>
+    </div>
     <div class="ds">Saved automatically on this machine. Match &amp; training options live on their own tabs.</div>
 
     <div class="sec">Sign-in</div>
