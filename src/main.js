@@ -429,9 +429,11 @@ let _menu=null, _profile=null;
 function _ensureLayers(){
   if(_menu) return;
   _menu=document.createElement('div'); _menu.className='fr-menu'; _menu.hidden=true; document.body.appendChild(_menu);
-  _profile=document.createElement('div'); _profile.className='fr-profile'; _profile.hidden=true; document.body.appendChild(_profile);
-  document.addEventListener('click', e=>{ if(_menu && !_menu.contains(e.target)) _menu.hidden=true;
-    if(_profile && !_profile.contains(e.target) && !e.target.closest('.fr-row')) _profile.hidden=true; });
+  // Profile is a centered MODAL with its own backdrop (the old positioned popover was auto-closed by the
+  // document click handler the instant you opened it from the context menu — its button isn't a .fr-row).
+  _profile=document.createElement('div'); _profile.className='fr-modal'; _profile.hidden=true; document.body.appendChild(_profile);
+  _profile.addEventListener('click', e=>{ if(e.target===_profile) _profile.hidden=true; });   // backdrop click closes
+  document.addEventListener('click', e=>{ if(_menu && !_menu.contains(e.target)) _menu.hidden=true; });
   document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeMenus(); });
 }
 function closeMenus(){ if(_menu) _menu.hidden=true; if(_profile) _profile.hidden=true; }
@@ -465,35 +467,37 @@ function openMenu(f, anchor){
 }
 function openProfile(f){
   _ensureLayers(); _menu.hidden=true;
-  const p=_profile;
-  p.innerHTML =
-    `<div class="ph">${avatarHTML(f.name,true)}<div class="pid"><b></b><span class="pstate ${f.state}"></span></div></div>`+
-    `<div class="prows"></div>`+
+  const acts = f.self ? '' :
     `<div class="pacts">`+
-      `<button class="pa inv">⚔ Invite</button>`+
+      `<button class="pa inv">⚔ Invite to match</button>`+
       `<button class="pa fav">${f.favorite?'★ Favorited':'☆ Favorite'}</button>`+
       `<button class="pa nick">✎ Nickname</button>`+
     `</div>`+
-    `<div class="pacts2"><button class="pa rem">Remove</button><button class="pa blk">Block</button></div>`;
-  p.querySelector('.pid b').textContent = dispName(f) + (f.nickname?` (${f.name})`:'');
-  const ps=p.querySelector('.pstate'); ps.textContent=statusText(f);
-  const rows=p.querySelector('.prows'); rows.innerHTML='';
+    `<div class="pacts2"><button class="pa rem">Remove friend</button><button class="pa blk">Block</button></div>`;
+  _profile.innerHTML =
+    `<div class="fr-profile">`+
+      `<button class="fr-x" title="Close">✕</button>`+
+      `<div class="ph">${avatarHTML(f.name,true)}<div class="pid"><b></b><span class="pstate ${f.state}"></span></div></div>`+
+      `<div class="prows"></div>`+ acts +
+    `</div>`;
+  const card=_profile.querySelector('.fr-profile');
+  card.querySelector('.pid b').textContent = dispName(f) + (f.nickname?` (${f.name})`:'');
+  card.querySelector('.pstate').textContent = statusText(f);
+  const rows=card.querySelector('.prows');
   const addr=(k,v)=>{ const d=document.createElement('div'); d.className='prow'; d.innerHTML=`<span>${k}</span><b></b>`; d.querySelector('b').textContent=v; rows.appendChild(d); };
   addr('Status', STATE_WORD[f.state]||'Offline');
   if(f.last_seen) addr('Last seen', relTime(f.last_seen));
   if(f.since) addr('Friends since', new Date(Number(f.since)*1000).toLocaleDateString());
-  _fillCareer(p, f.name);                         // async: append W/L · K/D · streak + recent matches
-  p.querySelector('.inv').onclick=()=>{ closeMenus(); inviteFriend(f); };
-  p.querySelector('.fav').onclick=()=>{ toggleFav(f); };
-  p.querySelector('.nick').onclick=()=>{ openNickname(f); };
-  p.querySelector('.rem').onclick=()=>{ closeMenus(); removeFriend(f.name); };
-  p.querySelector('.blk').onclick=()=>{ closeMenus(); blockFriend(f.name); };
-  if(f.self){ const a=p.querySelector('.pacts'), b=p.querySelector('.pacts2'); if(a)a.remove(); if(b)b.remove(); }
-  // center it within the friends panel
-  const host=$('friends').getBoundingClientRect();
-  p.hidden=false;
-  p.style.left=Math.max(8, host.left+(host.width-p.offsetWidth)/2)+'px';
-  p.style.top=Math.max(8, host.top+40)+'px';
+  _fillCareer(card, f.name);                       // async: append W/L · K/D · damage · streak + recent matches
+  card.querySelector('.fr-x').onclick=()=>{ _profile.hidden=true; };
+  if(!f.self){
+    card.querySelector('.inv').onclick=()=>{ _profile.hidden=true; inviteFriend(f); };
+    card.querySelector('.fav').onclick=()=>toggleFav(f);
+    card.querySelector('.nick').onclick=()=>{ _profile.hidden=true; openNickname(f); };
+    card.querySelector('.rem').onclick=()=>{ _profile.hidden=true; removeFriend(f.name); };
+    card.querySelector('.blk').onclick=()=>{ _profile.hidden=true; blockFriend(f.name); };
+  }
+  _profile.hidden=false;
 }
 function openNickname(f){
   _ensureLayers();
@@ -525,7 +529,10 @@ async function removeFriend(who){ const r=await sx('friend_remove',{ who }); if(
 async function blockFriend(who){ const r=await sx('friend_block',{ who }); if(r && r.ok){ closeMenus(); toast('Blocked '+who,'ok'); loadFriends(); } else toast((r&&r.error)||'Failed.','err'); }
 async function unblock(who){ const r=await sx('friend_unblock',{ who }); if(r && r.ok){ toast('Unblocked '+who,'ok'); loadFriends(); } }
 async function toggleFav(f){ const on=!f.favorite; const r=await sx('friend_favorite',{ who:f.name, on });
-  if(r && r.ok){ f.favorite=on; loadFriends(); } }
+  if(r && r.ok){ f.favorite=on; toast(on?('Added '+dispName(f)+' to favorites'):'Removed favorite','ok');
+    const fb=_profile && _profile.querySelector('.fav'); if(fb) fb.textContent=on?'★ Favorited':'☆ Favorite';
+    loadFriends(); }
+  else toast((r && r.error)||'Sign in to manage favorites.','err'); }
 async function setNickname(who, nickname){ const r=await sx('friend_nickname',{ who, nickname });
   if(r && r.ok){ toast(nickname?('Nickname set'):'Nickname cleared','ok'); loadFriends(); } }
 

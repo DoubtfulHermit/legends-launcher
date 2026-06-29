@@ -442,8 +442,12 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
 .fr-menu .nick-edit button{width:auto;padding:0 12px;color:#fff;background:linear-gradient(180deg,var(--ember),var(--ember2));font-weight:800;font-size:11px}
 
 /* profile popover (floating) */
-.fr-profile{position:fixed;z-index:47;width:300px;padding:16px;border-radius:14px;
+.fr-modal{position:absolute;inset:0;z-index:50;display:grid;place-items:center;background:rgba(4,3,7,.6)}
+.fr-profile{position:relative;width:344px;max-height:84vh;overflow:auto;padding:20px;border-radius:16px;
   background:linear-gradient(180deg,#1a1422,#100b18);border:1px solid var(--bd);box-shadow:0 26px 70px rgba(0,0,0,.65)}
+.fr-x{position:absolute;top:12px;right:14px;width:28px;height:28px;border:0;border-radius:9px;cursor:pointer;
+  background:rgba(255,255,255,.05);color:var(--mut);font-size:13px;line-height:1}
+.fr-x:hover{background:rgba(255,255,255,.1);color:var(--bone)}
 .fr-profile .ph{display:flex;align-items:center;gap:12px;margin-bottom:12px}
 .fr-profile .pid{min-width:0}
 .fr-profile .pid b{display:block;font-size:16px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
