@@ -40,6 +40,10 @@
         <svg class="el el-water" title="Water"><use href="#el-water"/></svg>
         <svg class="el el-earth" title="Earth"><use href="#el-earth"/></svg>
       </div>
+      <button class="social-tg" id="navSocial" title="Friends &amp; social" aria-label="Toggle friends panel">
+        <svg class="ic" viewBox="0 0 24 24" width="18" height="18"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <i class="social-badge" id="socialBadge" hidden>0</i>
+      </button>
       <div class="acct" id="acct">
         <span class="av">?</span><span class="nm">Sign in</span><span class="cv">&#9662;</span>
       </div>
@@ -63,29 +67,6 @@
           <button class="cbtn" id="cbDiscord" hidden>&#128172; Discord</button>
           <button class="cbtn" id="cbSite" hidden>&#127760; Website</button>
         </div>
-      </div>
-      <div class="fr" id="friends">
-        <div class="fr-head"><span class="fr-title">Friends</span>
-          <span class="fr-count" id="frCount"></span>
-          <button class="fr-addtoggle" id="frAddToggle" title="Add a friend" hidden>+ Add</button>
-        </div>
-        <div class="fr-party" id="frParty"></div>
-        <div class="fr-tabs" id="frTabs" hidden>
-          <button data-tab="friends" class="on">Friends</button>
-          <button data-tab="requests">Requests<i class="fr-badge" id="frReqBadge" hidden>0</i></button>
-          <button data-tab="blocked">Blocked</button>
-        </div>
-        <div class="fr-add" id="frAdd" hidden>
-          <div class="fr-add-row">
-            <input id="frAddName" placeholder="add a friend by name" spellcheck="false" autocomplete="off">
-            <button id="frAddBtn">Add</button>
-          </div>
-          <div class="fr-recent" id="frRecent"></div>
-        </div>
-        <input class="fr-search" id="frSearch" placeholder="Search friends&hellip;" spellcheck="false" hidden>
-        <div class="fr-invites" id="frInvites"></div>
-        <div class="fr-list" id="frList"></div>
-        <div class="fr-empty" id="frEmpty" hidden>Sign in to add friends and see who&rsquo;s online.</div>
       </div>
     </section>
 
@@ -194,6 +175,41 @@
       </div>
     </section>
   </div>
+
+  <!-- persistent social rail — lives OUTSIDE the view router so friends/party show on every page -->
+  <aside class="social" id="social">
+    <div class="fr" id="friends">
+      <div class="fr-me" id="frMe">
+        <span class="fr-av" id="frMeAv" style="--ah:30">?</span>
+        <span class="fr-me-dot" id="frMeDot"></span>
+        <div class="fr-me-id"><b id="frMeName">Sign in</b><small id="frMeState">Offline</small></div>
+        <button class="fr-collapse" id="frCollapse" title="Hide friends panel" aria-label="Hide friends panel">
+          <svg class="ic" viewBox="0 0 24 24" width="17" height="17"><polyline points="13 17 18 12 13 7"/><line x1="6" y1="5" x2="6" y2="19"/></svg>
+        </button>
+      </div>
+      <div class="fr-nav">
+        <div class="fr-tabs" id="frTabs" hidden>
+          <button data-tab="friends" class="on" title="Friends"><svg class="ic" viewBox="0 0 24 24" width="17" height="17"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></button>
+          <button data-tab="requests" title="Requests"><svg class="ic" viewBox="0 0 24 24" width="17" height="17"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><i class="fr-badge" id="frReqBadge" hidden>0</i></button>
+          <button data-tab="blocked" title="Blocked"><svg class="ic" viewBox="0 0 24 24" width="17" height="17"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></button>
+        </div>
+        <span class="fr-count" id="frCount"></span>
+        <button class="fr-addtoggle" id="frAddToggle" title="Add a friend" hidden><svg class="ic" viewBox="0 0 24 24" width="17" height="17"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></button>
+      </div>
+      <div class="fr-party" id="frParty"></div>
+      <div class="fr-add" id="frAdd" hidden>
+        <div class="fr-add-row">
+          <input id="frAddName" placeholder="add a friend by name" spellcheck="false" autocomplete="off">
+          <button id="frAddBtn">Add</button>
+        </div>
+        <div class="fr-recent" id="frRecent"></div>
+      </div>
+      <input class="fr-search" id="frSearch" placeholder="Search friends&hellip;" spellcheck="false" hidden>
+      <div class="fr-invites" id="frInvites"></div>
+      <div class="fr-list" id="frList"></div>
+      <div class="fr-empty" id="frEmpty" hidden>Sign in to add friends and see who&rsquo;s online.</div>
+    </div>
+  </aside>
 
   <!-- bottom action bar -->
   <div class="bar">

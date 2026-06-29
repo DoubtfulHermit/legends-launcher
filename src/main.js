@@ -159,6 +159,7 @@ const acct=$('acct'), acctMenu=$('acctMenu');
 function showChip(name){
   document.querySelector('.acct .nm').textContent = name || 'Sign in';
   document.querySelector('.acct .av').textContent = (name ? name[0] : '?').toUpperCase();
+  if(typeof renderMe==='function') renderMe();
 }
 acct.addEventListener('click', e=>{
   e.stopPropagation();
@@ -169,6 +170,41 @@ acct.addEventListener('click', e=>{
 });
 document.addEventListener('click', ()=>acctMenu.classList.remove('open'));
 acctMenu.addEventListener('click', e=>e.stopPropagation());
+
+// ── social rail: persistent friends panel + its nav toggle ───────────────────
+// The panel (#social) shows on EVERY page (it lives outside the view router). The
+// nav button toggles it; default = open. While it's closed, unseen notifications
+// (incoming friend requests + match/party invites) badge the toggle button.
+const navSocial=$('navSocial'), socialBadge=$('socialBadge');
+const isSocialOpen = () => !app.classList.contains('social-closed');
+function setSocialOpen(open){
+  app.classList.toggle('social-closed', !open);
+  SAVE.settings.socialOpen = !!open; persist();   // launcher-UI pref → persist() only (not a game setting)
+  updateSocialBadge();
+}
+function toggleSocial(){ setSocialOpen(!isSocialOpen()); }
+if(navSocial) navSocial.addEventListener('click', e=>{ e.stopPropagation(); toggleSocial(); });
+const _frCollapse=$('frCollapse'); if(_frCollapse) _frCollapse.addEventListener('click', ()=>setSocialOpen(false));
+if(SAVE.settings.socialOpen===false) app.classList.add('social-closed');   // apply persisted state (default open)
+
+// own-profile header at the top of the panel (avatar · name · online/offline)
+function renderMe(){
+  const s=SAVE.session, signedIn=!!(s&&s.name), name=(s&&s.name)||'';
+  const av=$('frMeAv'); if(av){ av.textContent=signedIn?initials(name):'?'; av.style.setProperty('--ah', nameHue(signedIn?name:'?')); }
+  const nm=$('frMeName'); if(nm) nm.textContent = signedIn ? name : 'Sign in';
+  const stx=$('frMeState'); if(stx) stx.textContent = signedIn ? 'Online' : 'Offline';
+  const me=$('frMe'); if(me) me.classList.toggle('online', signedIn);
+}
+// unseen-notification count → only shown while the panel is closed
+function notifCount(){ let n=0;
+  try{ n += (frData.incoming||[]).length + (frData.invites||[]).length; }catch{}
+  try{ if(_lastPartyInv) n+=1; }catch{}
+  return n; }
+function updateSocialBadge(){
+  if(!socialBadge) return;
+  const n=notifCount(), show = n>0 && !isSocialOpen();
+  socialBadge.hidden=!show; if(show) socialBadge.textContent = n>9?'9+':String(n);
+}
 
 // ── login gate ───────────────────────────────────────────────────────────────
 const loginEl=$('login');
@@ -283,6 +319,7 @@ function frShowEmpty(){
     const rt=$('frRetry'); if(rt) rt.onclick=e=>{ e.preventDefault(); retrySocial(); };
   } else { el.textContent='Sign in to add friends and see who’s online.'; }
   el.hidden=false;
+  renderMe(); updateSocialBadge();
 }
 async function retrySocial(){
   if(!(SAVE.session && SAVE.session.name)) return;
@@ -295,6 +332,7 @@ async function retrySocial(){
 
 // ── load + render ──
 async function loadFriends(){
+  renderMe();
   if(!_tok()){ frShowEmpty(); _resetNotify(); return; }
   $('frEmpty').hidden=true; $('frAddToggle').hidden=false; _hideShell(false);
   let r; try{ r = await invoke('friends_list',{ host:_srv(), token:_tok() }); }catch{ return; }
@@ -321,6 +359,7 @@ function renderSocial(){
   if(frTab==='friends') renderFriendsTab();
   else if(frTab==='requests') renderRequestsTab();
   else renderBlockedTab();
+  updateSocialBadge();
 }
 
 // game invites — a prominent strip above whichever tab is open
@@ -625,7 +664,7 @@ $('frSearch').addEventListener('input', e=>{ frSearch=e.target.value; renderFrie
 $('frAddToggle').addEventListener('click', ()=>{ const a=$('frAdd'); a.hidden=!a.hidden; if(!a.hidden){ $('frAddName').focus(); loadRecent(); } });
 $('frAddBtn').addEventListener('click', addFriend);
 $('frAddName').addEventListener('keydown', e=>{ if(e.key==='Enter') addFriend(); else if(e.key==='Escape') $('frAdd').hidden=true; });
-setInterval(()=>{ if(!document.hidden && !$('view-home').hidden) loadFriends(); }, 20000);
+setInterval(()=>{ if(!document.hidden && _tok()) loadFriends(); }, 20000);   // panel is global now → poll whenever signed in
 $('liPass').addEventListener('keydown', e=>{ if(e.key==='Enter') signIn(); });
 $('liUser').addEventListener('keydown', e=>{ if(e.key==='Enter') $('liPass').focus(); });
 $('liServer').addEventListener('input', ()=>{ SAVE.settings.server=$('liServer').value.trim(); saveSettings(); });
@@ -1431,7 +1470,7 @@ async function pollParty(){
   if(invId && invId!==_lastPartyInv && _frPrimed){ toast(r.invite.from+' invited you to their party','ok');
     osNotify('Party invite', r.invite.from+' invited you to their party'); }
   _lastPartyInv=invId;
-  partyData=r.party; renderParty(r.party, r.invite);
+  partyData=r.party; renderParty(r.party, r.invite); updateSocialBadge();
   if(r.party && r.party.status==='go' && r.party.go_at>_lastGo){
     _lastGo=r.party.go_at; toast('Party starting — queuing you in…','ok'); play(r.party.room_code, r.party.size);
   }
@@ -1637,7 +1676,9 @@ loadNews();
 //   index.html?demo=friends | requests | blocked | menu | profile | add | invite
 // Never runs in the real launcher (HAS_TAURI gates it). Uses the rich FALLBACK bundle.
 if(!HAS_TAURI && /[?&]demo/.test(location.search)){
-  const state = new URLSearchParams(location.search).get('demo') || 'friends';
+  const _q = new URLSearchParams(location.search);
+  const state = _q.get('demo') || 'friends';
+  if(_q.get('closed')!==null) app.classList.add('social-closed');   // preview the collapsed rail + toggle badge (instant, no transition)
   const _cw=$('cloneWizard'); if(_cw) _cw.style.display='none';
   if(state==='forgot'){                          // pre-login feature → keep the login card visible
     $('liUser').value='Aang'; $('liForgot').click();
