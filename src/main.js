@@ -864,7 +864,12 @@ async function armTicket(host){
 async function play(roomOverride, queueOverride){
   if(!found){ return locate(); }   // PLAY doubles as "locate game" when not found
   const settings=gather();
-  if(roomOverride!=null) settings.room=roomOverride;       // training: transient bot room, never persisted
+  // A roomOverride is a ONE-OFF room — a training bot code ("korra:medium:2") or a party room. It must
+  // drive THIS launch but must NOT become the saved match code. We write it to arena_link.ini for the
+  // game, then after the match restore the saved (normal) room (below) so it doesn't round-trip back in
+  // via load() on the next start. Normal matches (no override) keep persisting the typed code as before.
+  const transient = roomOverride!=null;
+  if(roomOverride!=null) settings.room=roomOverride;
   if(queueOverride!=null) settings.queue=queueOverride;
   // Seamless identity: mint a ticket from the signed-in session so the game loads the REAL
   // character. Don't silently launch unarmed — warn so the player knows it'll be a manual login.
@@ -902,6 +907,10 @@ async function play(roomOverride, queueOverride){
     await launched;                                             // ← the game has now closed
     if(w){ try{ await w.unminimize(); await w.setFocus(); }catch{} }   // bring the launcher back, ready to go again
   }catch(e){ toast(String(e),'err'); }
+  // Restore the saved (normal) room in arena_link.ini after a one-off launch (training/party), so the
+  // transient bot/party code never persists as the match room. gather() reads SAVE.settings (untouched
+  // by the override). No-op for normal matches, which keep their typed code.
+  if(transient){ try{ await invoke('save',{ settings: gather() }); syncMatch(); }catch{} }
   resetPlay();   // re-arm PLAY (game exited, or launch failed)
 }
 async function locate(){
