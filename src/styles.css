@@ -244,52 +244,65 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
 /* ── settings drawer ── */
 .scrim{position:absolute;inset:0;z-index:30;background:rgba(4,3,7,.5);opacity:0;pointer-events:none;transition:opacity .3s}
 .scrim.show{opacity:1;pointer-events:auto}
-.drawer{position:absolute;top:0;right:0;bottom:0;z-index:31;width:384px;transform:translateX(100%);
-  transition:transform .32s cubic-bezier(.4,0,.2,1);background:linear-gradient(180deg,#15101c,#0c0812);
-  border-left:1px solid var(--bd);box-shadow:-20px 0 60px rgba(0,0,0,.5);padding:24px 26px;overflow-y:auto}
+.drawer{position:absolute;top:0;right:0;bottom:0;z-index:31;width:392px;transform:translateX(100%);
+  transition:transform .32s cubic-bezier(.4,0,.2,1);background:linear-gradient(180deg,#130e1a,#0b0810);
+  border-left:1px solid var(--bd);box-shadow:-22px 0 60px rgba(0,0,0,.55);padding:20px 20px 24px;overflow-y:auto}
 .drawer.open{transform:translateX(0)}
-.drawer h3{font-family:Cinzel,serif;font-weight:900;letter-spacing:.14em;font-size:17px}
-/* identity card — same idiom as the social rail / profile menu */
-.dr-me{display:flex;align-items:center;gap:11px;margin:12px 0 14px;padding:11px;position:relative;
-  background:rgba(14,10,18,.6);border:1px solid var(--bd);border-radius:12px}
-.dr-me .fr-av{width:38px;height:38px;font-size:15px}
-.dr-me-dot{position:absolute;left:35px;top:30px;width:11px;height:11px;border-radius:50%;
-  background:var(--good);border:2px solid #15101c;box-shadow:0 0 6px var(--good)}
-.dr-me-id{min-width:0;display:flex;flex-direction:column;line-height:1.2}
-.dr-me-id b{font-size:15px;font-weight:800;color:var(--bone);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dr-me-id small{font-size:11.5px;color:var(--good)}
-.drawer .ds{color:var(--mut);font-size:12px;margin-bottom:14px}
-.drawer .x{position:absolute;top:20px;right:20px;width:30px;height:30px;border-radius:8px;border:1px solid var(--bd);
-  background:transparent;color:var(--mut);cursor:pointer;font-size:13px}
-.drawer .x:hover{color:var(--bone);background:rgba(255,255,255,.06)}
-.drawer .sec{font-size:10px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:var(--smoke);
-  margin:20px 0 12px;padding-bottom:7px;border-bottom:1px solid var(--bd)}
+.drawer::-webkit-scrollbar{width:7px}.drawer::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:4px}
+.dr-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:2px}
+.drawer h3{font-family:Cinzel,serif;font-weight:900;letter-spacing:.16em;font-size:18px;color:var(--bone)}
+.drawer .x{position:static;width:32px;height:32px;display:grid;place-items:center;border-radius:9px;border:1px solid var(--bd);
+  background:rgba(255,255,255,.03);color:var(--mut);cursor:pointer;font-size:13px;transition:background .15s,color .15s}
+.drawer .x:hover{color:var(--bone);background:rgba(255,255,255,.08)}
+/* identity header — FLAT, exactly like the social rail's .fr-me (no gradient/glow) */
+.dr-me{display:flex;align-items:center;gap:12px;margin:14px 0 14px;padding:0 2px 14px;position:relative;
+  border-bottom:1px solid var(--bd)}
+.dr-me .fr-av{width:44px;height:44px;font-size:17px}
+.dr-me-dot{position:absolute;left:33px;top:31px;width:12px;height:12px;border-radius:50%;
+  background:var(--good);border:2px solid #15101c;box-shadow:0 0 7px var(--good)}
+.dr-me-id{min-width:0;display:flex;flex-direction:column;line-height:1.25}
+.dr-me-id b{font-size:16px;font-weight:800;color:var(--bone);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dr-me-id small{font-size:12px;color:var(--good);font-weight:600}
+.drawer .ds{color:var(--smoke);font-size:11.5px;line-height:1.5;margin-bottom:16px}
+/* section cards — the social-panel idiom (flat dark card + quiet smoke header + rows) */
+.dr-card{background:rgba(14,10,18,.5);border:1px solid var(--bd);border-radius:14px;padding:13px 14px;margin-bottom:12px}
+.dr-card-h{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:10px;font-weight:800;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--smoke)}
+.dr-card-h .ic{width:15px;height:15px;color:var(--mut)}
+.dr-card .row{margin-bottom:0;padding:9px 0}
+.dr-card .row + .row{border-top:1px solid rgba(255,255,255,.05)}
+.dr-card .field{margin-bottom:12px}
+.dr-card .field:last-child{margin-bottom:0}
+/* quiet smoke labels to match the social panel's restraint (login card keeps its gold) */
+.dr-card .field label,.mode-detail .field label,.m-card .field label{color:var(--smoke)}
 .xbadge{display:inline-block;margin-left:7px;padding:1px 6px;border-radius:6px;font-size:8.5px;font-weight:800;
   letter-spacing:.08em;text-transform:uppercase;color:#ffd9a8;background:rgba(var(--ember-rgb),.18);
   border:1px solid rgba(var(--ember-rgb),.42);vertical-align:middle}
 
 /* ── account dropdown ── */
 /* account dropdown — mirrors the social rail: a profile header + icon menu rows */
-.acct-menu{position:absolute;top:52px;right:24px;z-index:35;width:236px;border-radius:14px;background:rgba(14,10,18,.97);
-  border:1px solid var(--bd);box-shadow:0 22px 55px rgba(0,0,0,.55);padding:8px;display:none}
+.acct-menu{position:absolute;top:52px;right:24px;z-index:35;width:244px;border-radius:14px;background:rgba(13,9,17,.98);
+  border:1px solid var(--bd);box-shadow:0 24px 58px rgba(0,0,0,.6);padding:9px;display:none}
 .acct-menu.open{display:block}
-.am-head{display:flex;align-items:center;gap:10px;padding:6px 6px 11px;margin-bottom:6px;border-bottom:1px solid var(--bd);position:relative}
-.am-head .fr-av{width:34px;height:34px;font-size:14px}
-.am-dot{position:absolute;left:30px;top:24px;width:11px;height:11px;border-radius:50%;
-  background:var(--good);border:2px solid #15101c;box-shadow:0 0 6px var(--good)}
+/* identity header — FLAT, same as the social rail's .fr-me */
+.am-head{display:flex;align-items:center;gap:11px;padding:4px 4px 12px;margin-bottom:6px;position:relative;
+  border-bottom:1px solid var(--bd)}
+.am-head .fr-av{width:40px;height:40px;font-size:16px}
+.am-dot{position:absolute;left:32px;top:28px;width:12px;height:12px;border-radius:50%;
+  background:var(--good);border:2px solid #15101c;box-shadow:0 0 7px var(--good)}
 .acct-menu.signedout .am-dot{background:var(--smoke);box-shadow:none}
-.am-id{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.2}
-.am-id b{font-size:14px;font-weight:800;color:var(--bone);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.am-id small{font-size:11px;color:var(--good);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.am-id{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.25}
+.am-id b{font-size:15px;font-weight:800;color:var(--bone);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.am-id small{font-size:11.5px;color:var(--good);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .acct-menu.signedout .am-id small{color:var(--mut)}
-.acct-menu button{width:100%;display:flex;align-items:center;gap:10px;text-align:left;padding:8px 9px;border:0;border-radius:9px;
-  background:transparent;color:var(--bone);font:inherit;font-size:13px;cursor:pointer;transition:background .12s,color .12s}
-.acct-menu button .ic{color:var(--mut);flex:none}
+.acct-menu button{width:100%;display:flex;align-items:center;gap:11px;text-align:left;padding:10px 10px;border:0;border-radius:10px;
+  background:transparent;color:var(--bone);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .12s,color .12s}
+.acct-menu button .ic{width:17px;height:17px;color:var(--mut);flex:none}
 .acct-menu button:hover{background:rgba(255,255,255,.06)}
 .acct-menu button:hover .ic{color:var(--gold)}
 .acct-menu button.danger:hover{background:rgba(192,57,43,.25);color:#ff9b8f}
 .acct-menu button.danger:hover .ic{color:#ff9b8f}
-.am-sep{height:1px;background:var(--bd);margin:5px 6px}
+.am-sep{height:1px;background:var(--bd);margin:6px 8px}
 
 /* ── real-app additions (toast, update modal, advanced controls) ── */
 [hidden]{display:none!important}
@@ -348,30 +361,33 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
 .play-title{font-family:Cinzel,serif;font-weight:900;font-size:32px;letter-spacing:.04em;margin:0}
 .play-sub{font-size:13.5px;color:var(--mut);margin:3px 0 0}
 .play-grid{display:grid;grid-template-columns:300px 1fr;gap:18px;align-items:start}
-.mode-list{display:flex;flex-direction:column;gap:9px}
-.mode-card{display:flex;align-items:center;gap:12px;width:100%;padding:13px 14px;border-radius:13px;cursor:pointer;
-  border:1px solid var(--bd);background:rgba(14,10,18,.55);color:var(--bone);font:inherit;text-align:left;
-  transition:border-color .14s,background .14s,transform .06s}
-.mode-card:hover{border-color:rgba(255,170,90,.4);background:rgba(255,170,90,.05)}
-.mode-card:active{transform:translateY(1px)}
-.mode-card.on{border-color:rgba(var(--ember-rgb),.7);background:linear-gradient(180deg,rgba(var(--ember-rgb),.16),rgba(var(--ember-rgb),.06));
-  box-shadow:0 0 0 1px rgba(var(--ember-rgb),.35) inset,0 12px 30px rgba(0,0,0,.35)}
-.mode-ic{flex:none;display:grid;place-items:center;width:42px;height:42px;border-radius:11px;font-size:19px;
-  background:rgba(8,6,12,.6);border:1px solid var(--bd);color:var(--gold)}
-.mode-ic .ic{width:21px;height:21px}
-.mode-card.on .mode-ic{border-color:rgba(var(--ember-rgb),.5);background:rgba(var(--ember-rgb),.14);
-  color:#fff;text-shadow:0 0 10px rgba(var(--ember-rgb),.7)}
-.mode-tx{display:flex;flex-direction:column;line-height:1.25;min-width:0}
-.mode-tx b{font-size:14.5px;font-weight:800}
-.mode-tx small{font-size:11px;color:var(--smoke)}
+.mode-list{display:flex;flex-direction:column;gap:10px}
+.mode-card{position:relative;display:flex;align-items:center;gap:13px;width:100%;padding:15px 15px;border-radius:14px;cursor:pointer;
+  border:1px solid var(--bd);background:rgba(14,10,18,.6);color:var(--bone);font:inherit;text-align:left;overflow:hidden;
+  transition:border-color .15s,background .15s,transform .1s,box-shadow .15s}
+.mode-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:transparent;transition:background .15s}
+.mode-card:hover{border-color:rgba(255,170,90,.45);background:rgba(255,170,90,.06);transform:translateY(-1px)}
+.mode-card:active{transform:translateY(0)}
+.mode-card.on{border-color:rgba(var(--ember-rgb),.45);background:rgba(var(--ember-rgb),.12);
+  box-shadow:0 8px 22px rgba(0,0,0,.3)}
+.mode-card.on::before{background:var(--ember)}
+.mode-ic{flex:none;display:grid;place-items:center;width:46px;height:46px;border-radius:12px;
+  background:rgba(8,6,12,.6);border:1px solid var(--bd);color:var(--gold);transition:border-color .15s,background .15s,color .15s}
+.mode-ic .ic{width:23px;height:23px}
+.mode-card.on .mode-ic{border-color:rgba(var(--ember-rgb),.45);background:rgba(var(--ember-rgb),.16);color:#fff}
+.mode-tx{display:flex;flex-direction:column;line-height:1.3;min-width:0}
+.mode-tx b{font-size:15px;font-weight:800;letter-spacing:.01em}
+.mode-tx small{font-size:11.5px;color:var(--smoke)}
 .mode-card.on .mode-tx small{color:var(--gold)}
-.mode-detail{background:rgba(14,10,18,.82);border:1px solid var(--bd);border-radius:16px;padding:20px 20px 16px;
-  box-shadow:0 18px 50px rgba(0,0,0,.45);min-height:264px}
+.mode-card.on::after{content:"\203A";position:absolute;right:13px;top:50%;transform:translateY(-50%);
+  color:var(--gold);font-size:20px;font-weight:700;opacity:.8}
+.mode-detail{background:rgba(14,10,18,.82);border:1px solid var(--bd);border-radius:16px;padding:22px 22px 18px;
+  box-shadow:0 18px 50px rgba(0,0,0,.45);min-height:272px}
 .mode-pane{display:none;flex-direction:column;gap:6px}
 .mode-pane.on{display:flex}
-.mp-head{margin-bottom:8px}
-.mp-head h3{font-family:Cinzel,serif;font-weight:800;font-size:20px;letter-spacing:.03em;margin:0}
-.mp-head p{font-size:12.5px;color:var(--mut);margin:5px 0 0;max-width:430px;line-height:1.5}
+.mp-head{margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--bd)}
+.mp-head h3{font-family:Cinzel,serif;font-weight:900;font-size:24px;letter-spacing:.03em;margin:0;color:var(--bone)}
+.mp-head p{font-size:12.5px;color:var(--mut);margin:6px 0 0;max-width:430px;line-height:1.5}
 .mp-foot{font-size:12px;color:var(--mut);margin-top:4px}
 .mp-foot b{color:var(--gold)}
 /* ranked rank card */
@@ -399,15 +415,38 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
 .m-sub{font-size:13px;color:var(--mut);margin-top:-8px}
 .m-card{background:rgba(14,10,18,.82);border:1px solid var(--bd);border-radius:16px;padding:18px 18px 6px;
   box-shadow:0 18px 50px rgba(0,0,0,.45);text-align:left}
-.seg--lbl button{flex-direction:column;height:auto;padding:7px 0;gap:0;line-height:1.15}
-.seg--lbl button b{font-size:15px}
-.seg--lbl button small{font-size:9px;letter-spacing:.1em;text-transform:uppercase;opacity:.8}
-.m-bots{display:flex;flex-wrap:wrap;gap:7px}
-.m-bots button{padding:6px 12px;border-radius:999px;border:1px solid var(--bd);background:rgba(8,6,12,.6);
-  color:var(--mut);font:inherit;font-size:12px;font-weight:700;cursor:pointer;text-transform:capitalize;transition:all .15s}
-.m-bots button.on{background:linear-gradient(180deg,var(--ember),var(--ember2));color:#fff;border-color:transparent}
+.seg--lbl button{flex-direction:column;height:auto;padding:11px 0;gap:2px;line-height:1.1}
+.seg--lbl button b{font-size:19px;font-weight:800}
+.seg--lbl button small{font-size:9px;letter-spacing:.12em;text-transform:uppercase;opacity:.85}
+.m-bots{display:flex;flex-wrap:wrap;gap:8px}
+.m-bots button{display:flex;align-items:center;gap:9px;padding:8px 15px 8px 8px;border-radius:11px;border:1px solid var(--bd);
+  background:rgba(8,6,12,.6);color:var(--mut);font:inherit;font-size:13px;font-weight:700;cursor:pointer;
+  text-transform:capitalize;transition:border-color .15s,background .15s,color .15s,transform .1s}
+.m-bots .bot-av{width:28px;height:28px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800;color:#fff;
+  background:linear-gradient(160deg,hsl(var(--bh,28) 42% 34%),hsl(var(--bh,28) 46% 22%));
+  border:1px solid hsl(var(--bh,28) 48% 46% / .8);box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.m-bots button:hover{border-color:rgba(var(--ember-rgb),.5);color:var(--bone);transform:translateY(-1px)}
+.m-bots button.on{background:linear-gradient(110deg,rgba(var(--ember-rgb),.22),rgba(var(--ember-rgb),.06));
+  color:#fff;border-color:rgba(var(--ember-rgb),.6)}
 .m-queue{height:56px;font-size:18px;display:flex;align-items:center;justify-content:center;gap:10px}
 .m-queue .arrow{font-size:14px}
+
+/* ── element-emblem identity for Play / Training (themes per element via .theme-el) ──
+   Match → a quiet element watermark in the panel corner; Training → the bending
+   emblem as a glowing "crest" portrait beside the options. The emblem shape + tint
+   follow the chosen element (Fire/Water/Earth/Air) through setElement(). */
+.pane-el{position:absolute;fill:currentColor;pointer-events:none;z-index:0}
+.mode-detail,.m-card{position:relative;overflow:hidden}
+.mode-pane,.m-card .field,.m-card .m-hint{position:relative;z-index:1}
+
+/* Match — quiet element watermark, bottom-right corner of the detail panel */
+.mode-detail .pane-el{width:300px;height:300px;right:-58px;bottom:-66px;color:var(--ember);opacity:.10}
+
+/* Training — element crest: a glowing emblem portrait on the card's left, with a divider */
+.m-card{padding-left:140px}
+.m-card::before{content:"";position:absolute;left:140px;top:18px;bottom:18px;width:1px;background:var(--bd);z-index:1}
+.m-card .pane-el{width:94px;height:94px;left:24px;top:50%;transform:translateY(-50%);
+  color:var(--ember);opacity:.9;filter:drop-shadow(0 0 14px rgba(var(--ember-rgb),.45))}
 
 /* ── Friends panel (Home right) — social system, in the existing idiom ── */
 .fr{flex:1;width:100%;background:rgba(14,10,18,.82);border:1px solid var(--bd);border-radius:16px;padding:12px;

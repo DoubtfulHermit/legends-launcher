@@ -137,6 +137,7 @@ function setElement(el){
   app.setAttribute('data-el', el);
   emblemUse.setAttribute('href', '#el-'+el);
   document.querySelector('#login .mark use')?.setAttribute('href','#el-'+el);
+  document.querySelectorAll('.theme-el use').forEach(u=>u.setAttribute('href','#el-'+el));   // Play/Training element motifs
   document.querySelectorAll('.elements .el').forEach(s=>
     s.classList.toggle('on', /el-(\w+)/.exec(s.getAttribute('class'))[1]===el));
   currentElement=el; initParticles();
@@ -844,7 +845,8 @@ const BOTS = ['dummy','target','korra'];
 if(!BOTS.includes(SAVE.match.bot)){ SAVE.match.bot = 'korra'; persist(); }
 function renderTBots(){
   $('tBots').innerHTML = BOTS.map(b=>
-    `<button data-bot="${b}" class="${b===SAVE.match.bot?'on':''}">${b}</button>`).join('');
+    `<button data-bot="${b}" class="${b===SAVE.match.bot?'on':''}" style="--bh:${nameHue(b)}">`
+    +`<span class="bot-av">${initials(b)}</span><span class="bot-nm">${b}</span></button>`).join('');
 }
 function syncTraining(){
   document.querySelectorAll('#tSeg button').forEach(b=>b.classList.toggle('on',+b.dataset.q===(SAVE.match.tsize||2)));
@@ -1707,6 +1709,7 @@ if(!HAS_TAURI && /[?&]demo/.test(location.search)){
       else if(state==='waiting'){ _outInvites.push({to:'KorraMain',disp:'KorraMain',room:'x',size:2,deadline:Date.now()+60000}); renderInvites(); }
       else if(state==='leaderboard') setView('ranks');
       else if(state==='match'){ setView('match'); }
+      else if(state==='training'){ setView('training'); }
       else if(state==='ranked'){ setView('match'); setPlayMode('ranked');
         setTimeout(()=>renderRankCard({ok:true,ranked:true,tier_name:'Gold',division_name:'II',lp:64,rating:1340,wins:23,losses:17,streak:3}), 60); }
       else if(state==='custom'){ setView('match'); setPlayMode('custom'); }
