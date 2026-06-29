@@ -1342,6 +1342,14 @@ function renderParty(party, invite){
     row.innerHTML=avatarHTML(nm)+'<span class="dot"></span><b class="nm"></b><span class="rd">invited…</span>';
     row.querySelector('.nm').textContent=nm; wrap.appendChild(row);
   }
+  // Empty slots up to the party size — click to invite a friend (Valorant/LoL-style "fill your party").
+  const filled = party.members.length + (party.pending||[]).length;
+  if(party.is_leader) for(let i=filled; i<(party.size||4); i++){
+    const slot=document.createElement('button'); slot.className='party-slot';
+    slot.innerHTML='<span class="ps-plus">+</span><span class="ps-l">Invite a friend</span>';
+    slot.onclick=e=>{ e.stopPropagation(); openPartyInvite(slot, party); };
+    wrap.appendChild(slot);
+  }
   const acts=document.createElement('div'); acts.className='party-acts';
   const me=party.members.find(m=>m.name===(SAVE.session&&SAVE.session.name));
   const ready=me?me.ready:false;
@@ -1350,6 +1358,22 @@ function renderParty(party, invite){
   acts.querySelector('.rdy').onclick=()=>partyReady(!ready);
   const go=acts.querySelector('.go'); if(go) go.onclick=partyStart;
   wrap.appendChild(acts); host.appendChild(wrap);
+}
+// Friend-picker for an empty party slot: your friends not already in the party, click to invite.
+function openPartyInvite(anchor, party){
+  _ensureLayers(); if(_profile) _profile.hidden=true;
+  const inParty=new Set([...(party.members||[]).map(m=>m.name), ...(party.pending||[])]);
+  const cands=(frData.friends||[]).filter(f=>!inParty.has(f.name));
+  _menu.innerHTML='';
+  if(!cands.length){ const d=document.createElement('div'); d.className='fr-pick-empty'; d.textContent='No friends to invite'; _menu.appendChild(d); }
+  for(const f of cands.slice(0,14)){
+    const b=document.createElement('button'); b.className='fr-pick';
+    b.innerHTML=avatarHTML(f.name)+`<span></span><i class="st ${f.state}"></i>`;
+    b.querySelector('span').textContent=dispName(f);
+    b.onclick=e=>{ e.stopPropagation(); _menu.hidden=true; partyInvite(f.name); };
+    _menu.appendChild(b);
+  }
+  _place(_menu, anchor);
 }
 async function _pcall(cmd, extra){ const r=await sx(cmd, extra); if(r && r.ok){ partyData=r.party; renderParty(r.party, r.invite); }
   else if(r && r.error) toast(r.error,'err'); return r; }
@@ -1374,8 +1398,7 @@ if(!HAS_TAURI){
   FALLBACK.party_get={ ok:true, invite:null, party:{ id:'demo', leader:'Aang', is_leader:true,
     room_code:'party-7f3a2c', size:4, status:'idle', go_at:0, pending:['Zephyra'], members:[
       {name:'Aang',ready:true,leader:true,state:'online'},
-      {name:'KorraMain',ready:true,leader:false,state:'in-game'},
-      {name:'BoulderKing',ready:false,leader:false,state:'away'} ] } };
+      {name:'KorraMain',ready:false,leader:false,state:'in-game'} ] } };
   const fr=[]; for(let i=0;i<64;i++){ const a=i/9; fr.push({ t:i*0.25, players:[
     {s:0,n:'Aang', f:4,x:Math.cos(a)*6,        z:Math.sin(a)*6,        h:Math.max(0,128-i),    hm:130,d:0,a:'move'},
     {s:1,n:'Korra',f:3,x:Math.cos(a+2.1)*7,    z:Math.sin(a+2.1)*7,    h:Math.max(0,140-i*0.6),hm:140,d:0,a:'attack'},
