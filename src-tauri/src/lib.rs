@@ -1131,8 +1131,12 @@ fn find_proton_path() -> Option<PathBuf> {
 // Launch the game. Returns the child process when we can track it (so the caller can wait for
 // the game to exit) — or None when it's detached on purpose (gamescope via setsid).
 fn spawn_game(dir: &Path, exe_path: &Path, auto_login: bool, gamescope: bool, gamescope_args: &str,
-              width: u32, height: u32, fullscreen: bool, proton: bool) -> Result<Option<std::process::Child>, String> {
+              width: u32, height: u32, fullscreen: bool, proton: bool, close_delay_s: i64) -> Result<Option<std::process::Child>, String> {
     use std::process::Command;
+    // Operator-set match-close delay (admin panel → gateway → here). Set it on the launcher process so
+    // EVERY spawn path's child inherits it (Windows direct, umu-run, gamescope's `env` passthrough);
+    // the in-game zz_quickmatch DLL reads AVATAR_CLOSE_DELAY (seconds; 0 = don't auto-close).
+    std::env::set_var("AVATAR_CLOSE_DELAY", close_delay_s.to_string());
     // Login-only is not skip/queue. Keep the old skip env off for Auto sign-in and use a separate
     // marker so the DLL installs only the login driver + observers, not the queue-era hooks.
     let skip_env = "0";
@@ -1323,7 +1327,11 @@ async fn play(settings: Settings, windowed: bool, username: Option<String>, tick
     // Config.ini (hardcoded 800x600 top-left), so only use it as a last-resort fallback.
     let windowed_exe = dir.join("AvatarMP_Windowed.exe");
     let target = if windowed_exe.is_file() { windowed_exe } else { dir.join("AvatarMP.exe") };
-    let child = spawn_game(&dir, &target, logged_in, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen, s.proton)?;
+    // Operator-tunable client settings from the gateway admin panel (fetched fresh each Play). Currently
+    // the match-close delay (seconds); the DLL gets it via AVATAR_CLOSE_DELAY. Default 6 if unreachable.
+    let close_delay_s: i64 = gw_json(&s.host, "GET", "/launcher/client-config", None, serde_json::json!({}))
+        .get("close_delay_s").and_then(|v| v.as_i64()).unwrap_or(6);
+    let child = spawn_game(&dir, &target, logged_in, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen, s.proton, close_delay_s)?;
     // Block (on this spawn_blocking thread) until the game exits, so the JS `await invoke('play')`
     // resolves only when the match is actually over — that's what keeps PLAY disabled (no second
     // instance) and re-arms it afterwards. `None` = detached (gamescope) → return right away.
