@@ -89,23 +89,67 @@
       </div>
     </section>
 
-    <!-- MATCH: set up a match against players -->
+    <!-- MATCH: choose a mode (Quick / Ranked / Custom), then Play -->
     <section class="view view--match" id="view-match" hidden>
-      <div class="match">
-        <div class="m-title">Set up your match</div>
-        <div class="m-sub">Pick a size and, optionally, a room code &mdash; then hit Play.</div>
-        <div class="m-card">
-          <div class="field"><label>Match size</label>
-            <div class="seg seg--lbl" id="mSeg">
-              <button data-q="2"><b>2</b><small>Duel</small></button>
-              <button data-q="3"><b>3</b><small>Trio</small></button>
-              <button data-q="4"><b>4</b><small>Arena</small></button>
+      <div class="playview">
+        <div class="play-head">
+          <h2 class="play-title">Play</h2>
+          <p class="play-sub">Choose how you want to fight.</p>
+        </div>
+        <div class="play-grid">
+          <aside class="mode-list" id="modeList">
+            <button class="mode-card on" data-mode="quick">
+              <span class="mode-ic">&#9876;</span>
+              <span class="mode-tx"><b>Quick Match</b><small>Open matchmaking</small></span>
+            </button>
+            <button class="mode-card" data-mode="ranked">
+              <span class="mode-ic">&#9733;</span>
+              <span class="mode-tx"><b>Ranked 1v1</b><small>Climb the ladder</small></span>
+            </button>
+            <button class="mode-card" data-mode="custom">
+              <span class="mode-ic">&#9783;</span>
+              <span class="mode-tx"><b>Custom Room</b><small>Private match by code</small></span>
+            </button>
+          </aside>
+          <div class="mode-detail">
+            <!-- QUICK -->
+            <div class="mode-pane on" id="pane-quick">
+              <div class="mp-head"><h3>Quick Match</h3><p>Jump into open matchmaking &mdash; the server pairs you with other legends.</p></div>
+              <div class="field"><label>Match size</label>
+                <div class="seg seg--lbl" id="mSeg">
+                  <button data-q="2"><b>2</b><small>Duel</small></button>
+                  <button data-q="3"><b>3</b><small>Trio</small></button>
+                  <button data-q="4"><b>4</b><small>Arena</small></button>
+                </div>
+              </div>
+              <div class="mp-foot">Hit <b>Play</b> to queue.</div>
+            </div>
+            <!-- RANKED -->
+            <div class="mode-pane" id="pane-ranked">
+              <div class="mp-head"><h3>Ranked 1v1</h3><p>A solo duel ladder &mdash; win to climb tiers and earn LP.</p></div>
+              <div class="rank-card" id="rankCard"><div class="rc-empty">Sign in to see your rank.</div></div>
+              <div class="rank-search" id="rankSearch" hidden>
+                <span class="ld-spin"></span><span id="rankSearchTx">Searching for an opponent&hellip;</span>
+                <button class="rs-cancel" id="rankCancel">Cancel</button>
+              </div>
+              <div class="mp-foot">Hit <b>Play Ranked</b> to find a match.</div>
+            </div>
+            <!-- CUSTOM -->
+            <div class="mode-pane" id="pane-custom">
+              <div class="mp-head"><h3>Custom Room</h3><p>Share a code with friends &mdash; everyone who enters it lands in the same match.</p></div>
+              <div class="field"><label>Room code</label>
+                <input id="mRoom" placeholder="e.g. duel7" spellcheck="false" autocomplete="off"></div>
+              <div class="field"><label>Match size</label>
+                <div class="seg seg--lbl" id="cSeg">
+                  <button data-q="2"><b>2</b><small>Duel</small></button>
+                  <button data-q="3"><b>3</b><small>Trio</small></button>
+                  <button data-q="4"><b>4</b><small>Arena</small></button>
+                </div>
+              </div>
+              <div class="mp-foot">Hit <b>Play</b> to create or join the room.</div>
             </div>
           </div>
-          <div class="field" id="mRoomField"><label>Room code <span style="color:var(--smoke);font-weight:700">&mdash; optional</span></label>
-            <input id="mRoom" placeholder="leave blank for open matchmaking"></div>
         </div>
-        <div class="m-hint">Hit <b>Play</b> below to queue.</div>
       </div>
     </section>
 

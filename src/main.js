@@ -681,11 +681,13 @@ $('navTraining').addEventListener('click', e=>{ e.preventDefault(); setView('tra
 $('navNews').addEventListener('click', e=>{ e.preventDefault(); setView('ranks'); });
 
 // The bottom-right button is one contextual CTA:
-//   Home / Ranks  → "MATCH"  (jump to the Match tab)
-//   Match         → "PLAY"   (queue a player match)
-//   Training      → "PLAY"   (start a match vs AI)
+//   Home / Ranks  → "MATCH"   (jump to the Match tab)
+//   Match (quick/custom) → "PLAY"        Match (ranked) → "PLAY RANKED" / "SEARCHING…"
+//   Training      → "PLAY"    (start a match vs AI)
+let _playMode = 'quick';                      // quick | ranked | custom (set from SAVE on load)
 function ctaMode(){
-  if(curView==='match'||curView==='training') return 'play';
+  if(curView==='training') return 'play';
+  if(curView==='match') return _playMode==='ranked' ? 'ranked' : 'play';
   if(curView==='home') return 'goto';
   return 'hidden';                           // ranks: viewing only — no action button
 }
@@ -694,7 +696,8 @@ function updateCTA(){
   if(m==='hidden'){ pw.style.display='none'; return; }
   if(pw.style.display==='none') pw.style.display='flex';
   if(pw.disabled) return;                    // mid-launch: leave the label alone
-  setPlayLabel(m==='play' ? 'PLAY' : 'MATCH');
+  if(m==='ranked') setPlayLabel(_rankedSearching ? 'SEARCHING…' : 'PLAY RANKED');
+  else setPlayLabel(m==='play' ? 'PLAY' : 'MATCH');
 }
 function onCTA(){
   const m=ctaMode();
@@ -704,23 +707,82 @@ function onCTA(){
     const count = Math.max(1, (SAVE.match.tsize||2) - 1);
     const room = SAVE.match.bot + ':' + SAVE.match.diff + (count>1 ? ':'+count : '');
     play(room, SAVE.match.tsize||2);         // transient room + arena size; never persisted
-  } else if(partyData && (partyData.members||[]).length>1){
+    return;
+  }
+  // Match view — act on the selected mode.
+  if(_playMode==='ranked'){ if(!_rankedSearching) rankedQueue(); return; }
+  if(partyData && (partyData.members||[]).length>1){
     // In a party → PLAY queues the WHOLE party together (leader starts it; members ready up).
     if(partyData.is_leader){ partyStart(); }
     else { toast('Your leader starts the match — you’re readied up.','ok'); partyReady(true); }
-  } else {
-    play();                                  // solo human match: uses the typed room code
+    return;
   }
+  if(_playMode==='custom') play((SAVE.settings.room||'').trim(), SAVE.settings.queue);
+  else play('', SAVE.settings.queue);        // quick = open matchmaking (no room)
 }
 
-// ── Match setup (vs players) ────────────────────────────────────────────────────
-function syncMatch(){
-  document.querySelectorAll('#mSeg button').forEach(b=>b.classList.toggle('on',+b.dataset.q===SAVE.settings.queue));
-  $('mRoom').value = SAVE.settings.room || '';
+// ── Match modes (Quick / Ranked / Custom) ───────────────────────────────────────
+function setPlayMode(mode){
+  _playMode = (['quick','ranked','custom'].includes(mode)) ? mode : 'quick';
+  SAVE.settings.playMode = _playMode; saveSettings();
+  document.querySelectorAll('#modeList .mode-card').forEach(c=>c.classList.toggle('on', c.dataset.mode===_playMode));
+  for(const k of ['quick','ranked','custom']){ const p=$('pane-'+k); if(p) p.classList.toggle('on', k===_playMode); }
+  if(_playMode==='ranked') loadMyRank();
+  updateCTA();
 }
-$('mSeg').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
-  SAVE.settings.queue=+b.dataset.q; saveSettings(); syncMatch(); });
+function syncMatch(){
+  document.querySelectorAll('#mSeg button,#cSeg button').forEach(b=>b.classList.toggle('on',+b.dataset.q===SAVE.settings.queue));
+  $('mRoom').value = SAVE.settings.room || '';
+  setPlayMode(SAVE.settings.playMode || _playMode || 'quick');
+}
+$('modeList').addEventListener('click', e=>{ const c=e.target.closest('.mode-card'); if(c) setPlayMode(c.dataset.mode); });
+function _segPick(e){ const b=e.target.closest('button'); if(!b) return;
+  SAVE.settings.queue=+b.dataset.q; saveSettings(); syncMatch(); }
+$('mSeg').addEventListener('click', _segPick);
+$('cSeg').addEventListener('click', _segPick);
 $('mRoom').addEventListener('input', e=>{ SAVE.settings.room=e.target.value; saveSettings(); });
+
+// ── Ranked 1v1 (gateway hands back the room code; play() launches — player types nothing) ──
+let _rankedSearching=false;
+const TIER_COLORS = { bronze:['#a9743f','#6e451f'], silver:['#b9c2cc','#717c89'], gold:['#e7c24a','#9c7a1e'],
+  platinum:['#5fd3c0','#2a8f82'], diamond:['#7db4ff','#3a6fd8'], master:['#c47dff','#7b32c9'],
+  grandmaster:['#ff6a6a','#c12626'], avatar:['#ffd76a','#ff8a30'], unranked:['#6b7280','#3b4250'] };
+const tierColors = t => TIER_COLORS[(t||'').toLowerCase().split(' ')[0]] || TIER_COLORS.unranked;
+const tierAbbrev = t => (t||'').split(' ')[0].slice(0,4).toUpperCase();
+function showRankSearch(on){ const el=$('rankSearch'); if(el) el.hidden=!on; }
+function renderRankCard(me){
+  const el=$('rankCard'); if(!el) return;
+  if(!_tok()){ el.innerHTML='<div class="rc-empty">Sign in to play ranked.</div>'; return; }
+  if(!me || !me.ok){ el.innerHTML='<div class="rc-empty">Rank unavailable — try again in a moment.</div>'; return; }
+  if(!me.ranked){
+    el.innerHTML='<div class="rc-badge" style="--tier1:#6b7280;--tier2:#3b4250">UN<br>RANKED</div>'
+      +'<div class="rc-main"><div class="rc-tier">Unranked</div><div class="rc-lp">Play a ranked match to place</div>'
+      +'<div class="rc-stats">No ranked games yet</div></div>';
+    return;
+  }
+  const tier=me.tier_name||'Unranked', div=me.division_name||'';
+  const apex = !div || /avatar/i.test(tier);
+  const [t1,t2]=tierColors(tier);
+  const badge = apex ? tier.slice(0,6).toUpperCase() : tierAbbrev(tier)+'<br>'+div;
+  const top = apex ? (me.rating+' RR') : (me.lp+' LP');
+  const streak = me.streak ? ` · <span class="streak">${me.streak>0?'+':''}${me.streak}</span>` : '';
+  el.innerHTML = `<div class="rc-badge" style="--tier1:${t1};--tier2:${t2}">${badge}</div>`
+    +`<div class="rc-main"><div class="rc-tier">${tier}${div&&!apex?' '+div:''}</div>`
+    +`<div class="rc-lp">${top} · ${me.rating} rating</div>`
+    +`<div class="rc-stats"><span class="w">${me.wins||0}W</span> <span class="l">${me.losses||0}L</span>${streak}</div></div>`;
+}
+async function loadMyRank(){ if(!_tok()){ renderRankCard(null); return; } const me=await sx('ranked_me',{ mode:'1v1' }); renderRankCard(me); }
+async function rankedQueue(){
+  const r=await sx('ranked_queue',{ mode:'1v1' });
+  if(!r || !r.ok){ toast((r && r.error) || 'Sign in to play ranked.','err'); return; }
+  toast('Searching for a ranked match…','ok');
+  _rankedSearching=true; showRankSearch(true); updateCTA();
+  await play(r.match_code, r.size||2);        // writes arena_link.ini + launches; waits for the game to exit
+  _rankedSearching=false; showRankSearch(false); updateCTA();
+  loadMyRank();                               // refresh the rank card after the match (gateway rates it)
+}
+async function rankedCancel(){ _rankedSearching=false; showRankSearch(false); updateCTA(); await sx('ranked_cancel'); toast('Left the ranked queue','ok'); }
+{ const rc=$('rankCancel'); if(rc) rc.onclick=rankedCancel; }
 
 // ── Training setup (vs AI) ──────────────────────────────────────────────────────
 // Roster mirrors the server's BOT_ROSTER (config.py): dummy = stand-still target,
@@ -1396,12 +1458,13 @@ function renderParty(party, invite){
     row.innerHTML=avatarHTML(nm)+'<span class="dot"></span><b class="nm"></b><span class="rd">invited…</span>';
     row.querySelector('.nm').textContent=nm; wrap.appendChild(row);
   }
-  // Empty slots up to the party size — click to invite a friend (Valorant/LoL-style "fill your party").
+  // Empty slots up to the party size — click to reveal an INLINE friends list (no floating menu).
   const filled = party.members.length + (party.pending||[]).length;
-  if(party.is_leader) for(let i=filled; i<(party.size||4); i++){
+  if(party.is_leader && _partyInviteOpen) renderPartyInvitePanel(wrap, party);
+  else if(party.is_leader) for(let i=filled; i<(party.size||4); i++){
     const slot=document.createElement('button'); slot.className='party-slot';
     slot.innerHTML='<span class="ps-plus">+</span><span class="ps-l">Invite a friend</span>';
-    slot.onclick=e=>{ e.stopPropagation(); openPartyInvite(slot, party); };
+    slot.onclick=e=>{ e.stopPropagation(); _partyInviteOpen=true; renderParty(party, invite); };
     wrap.appendChild(slot);
   }
   const acts=document.createElement('div'); acts.className='party-acts';
@@ -1413,21 +1476,42 @@ function renderParty(party, invite){
   const go=acts.querySelector('.go'); if(go) go.onclick=partyStart;
   wrap.appendChild(acts); host.appendChild(wrap);
 }
-// Friend-picker for an empty party slot: your friends not already in the party, click to invite.
-function openPartyInvite(anchor, party){
-  _ensureLayers(); if(_profile) _profile.hidden=true;
+// Inline party invite: an in-place friends list (NOT a floating menu). Your friends who aren't
+// already in the party, shown as rows like the Friends tab — click a row to invite.
+let _partyInviteOpen=false;
+let _partyInviteSearch='';
+function renderPartyInvitePanel(wrap, party){
+  const panel=document.createElement('div'); panel.className='party-invite';
+  const head=document.createElement('div'); head.className='pi-head';
+  head.innerHTML='<span class="pi-t">Invite to party</span><button class="pi-x" title="Done">✕</button>';
+  head.querySelector('.pi-x').onclick=e=>{ e.stopPropagation(); _partyInviteOpen=false; _partyInviteSearch=''; renderParty(partyData, null); };
+  panel.appendChild(head);
   const inParty=new Set([...(party.members||[]).map(m=>m.name), ...(party.pending||[])]);
-  const cands=(frData.friends||[]).filter(f=>!inParty.has(f.name));
-  _menu.innerHTML='';
-  if(!cands.length){ const d=document.createElement('div'); d.className='fr-pick-empty'; d.textContent='No friends to invite'; _menu.appendChild(d); }
-  for(const f of cands.slice(0,14)){
-    const b=document.createElement('button'); b.className='fr-pick';
-    b.innerHTML=avatarHTML(f.name)+`<span></span><i class="st ${f.state}"></i>`;
-    b.querySelector('span').textContent=dispName(f);
-    b.onclick=e=>{ e.stopPropagation(); _menu.hidden=true; partyInvite(f.name); };
-    _menu.appendChild(b);
+  const pending=new Set(party.pending||[]);
+  let cands=(frData.friends||[]).filter(f=>!inParty.has(f.name));
+  if(frData.friends && frData.friends.length>6){
+    const s=document.createElement('input'); s.className='pi-search'; s.placeholder='Search friends…'; s.value=_partyInviteSearch;
+    s.oninput=()=>{ _partyInviteSearch=s.value; const q=s.value.toLowerCase();
+      panel.querySelectorAll('.pi-row').forEach(r=>{ r.hidden = !!q && !r.dataset.name.toLowerCase().includes(q); }); };
+    panel.appendChild(s);
   }
-  _place(_menu, anchor);
+  const list=document.createElement('div'); list.className='pi-list';
+  // order: online first, then the rest — same priority feel as the Friends tab
+  const rank=f=>({'in-game':0,online:1,away:2,offline:3}[f.state]??3);
+  cands.sort((a,b)=>rank(a)-rank(b) || dispName(a).localeCompare(dispName(b)));
+  if(!cands.length){ list.innerHTML='<div class="pi-empty">No friends to invite — add some on the Home tab.</div>'; }
+  for(const f of cands){
+    const invited=pending.has(f.name);
+    const row=document.createElement('div'); row.className='pi-row '+(f.state||'offline'); row.dataset.name=f.name;
+    row.innerHTML=avatarHTML(f.name)+`<span class="dot"></span>`
+      +`<div class="meta"><b class="nm"></b><span class="st"></span></div>`
+      +(invited?'<span class="pi-inv">Invited</span>':'<button class="pi-add">Invite</button>');
+    row.querySelector('.nm').textContent=dispName(f);
+    row.querySelector('.st').textContent=statusText(f);
+    if(!invited){ const add=()=>partyInvite(f.name); row.querySelector('.pi-add').onclick=e=>{ e.stopPropagation(); add(); }; row.onclick=add; }
+    list.appendChild(row);
+  }
+  panel.appendChild(list); wrap.appendChild(panel);
 }
 async function _pcall(cmd, extra){ const r=await sx(cmd, extra); if(r && r.ok){ partyData=r.party; renderParty(r.party, r.invite); }
   else if(r && r.error) toast(r.error,'err'); return r; }
@@ -1563,6 +1647,10 @@ if(!HAS_TAURI && /[?&]demo/.test(location.search)){
       else if(state==='partyinvite'){ pollParty().then(()=>setTimeout(()=>{ const s=document.querySelector('.party-slot'); if(s) s.click(); }, 120)); }
       else if(state==='waiting'){ _outInvites.push({to:'KorraMain',disp:'KorraMain',room:'x',size:2,deadline:Date.now()+60000}); renderInvites(); }
       else if(state==='leaderboard') setView('ranks');
+      else if(state==='match'){ setView('match'); }
+      else if(state==='ranked'){ setView('match'); setPlayMode('ranked');
+        setTimeout(()=>renderRankCard({ok:true,ranked:true,tier_name:'Gold',division_name:'II',lp:64,rating:1340,wins:23,losses:17,streak:3}), 60); }
+      else if(state==='custom'){ setView('match'); setPlayMode('custom'); }
       else if(state==='help') $('cbHow').click();
       else if(state==='account') openDrawer();
     });

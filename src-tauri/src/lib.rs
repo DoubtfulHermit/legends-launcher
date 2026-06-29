@@ -1760,6 +1760,42 @@ async fn party_start(host: String, token: String) -> serde_json::Value {
         .await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
 }
 
+// ── ranked 1v1: ask the gateway for a match code, then play() launches into it ──
+// Mirrors the party_* commands (host+token, Bearer header, JSON relay). The launcher never
+// types a code — /ranked/queue hands one back (FIFO `rk1v1` now, per-pair in Phase 2).
+#[tauri::command]
+async fn ranked_queue(host: String, token: String, mode: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/ranked/queue", Some(&token), serde_json::json!({"mode": mode}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn ranked_cancel(host: String, token: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/ranked/cancel", Some(&token), serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn ranked_status(host: String, token: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "GET", "/ranked/status", Some(&token), serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn ranked_me(host: String, token: String, mode: String) -> serde_json::Value {
+    let path = format!("/ranked/me?mode={}", qenc(&mode));
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "GET", &path, Some(&token), serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn ranked_leaderboard(host: String, mode: String) -> serde_json::Value {
+    let path = format!("/ranked/leaderboard?mode={}", qenc(&mode));
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "GET", &path, None, serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // WebKitGTK on Linux renders a grey/blank window when its DMABUF renderer can't
@@ -1803,7 +1839,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, invite_send, invite_respond, invite_outgoing, invite_cancel, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start, account_forgot, account_change_password, account_delete, session_logout_all, os_notify, save_loading_image])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, invite_send, invite_respond, invite_outgoing, invite_cancel, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start, ranked_queue, ranked_cancel, ranked_status, ranked_me, ranked_leaderboard, account_forgot, account_change_password, account_delete, session_logout_all, os_notify, save_loading_image])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
