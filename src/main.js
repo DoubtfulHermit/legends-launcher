@@ -323,6 +323,15 @@ function renderSocial(){
 // game invites — a prominent strip above whichever tab is open
 function renderInvites(){
   const host=$('frInvites'); host.innerHTML='';
+  for(const o of _outInvites){                    // outgoing: "waiting for them to accept" + cancel
+    const el=document.createElement('div'); el.className='fr-invite out';
+    el.innerHTML = avatarHTML(o.to) +
+      `<div class="meta"><b></b><small>waiting to accept… · ${o.size||2}-player</small></div>`+
+      `<span class="ld-spin"></span><button class="no" title="Cancel invite">✕</button>`;
+    el.querySelector('b').textContent=o.disp||o.to;
+    el.querySelector('.no').onclick=()=>cancelInvite(o.to);
+    host.appendChild(el);
+  }
   for(const iv of (frData.invites||[])){
     const el=document.createElement('div'); el.className='fr-invite';
     el.innerHTML = avatarHTML(iv.from) +
@@ -536,13 +545,54 @@ async function toggleFav(f){ const on=!f.favorite; const r=await sx('friend_favo
 async function setNickname(who, nickname){ const r=await sx('friend_nickname',{ who, nickname });
   if(r && r.ok){ toast(nickname?('Nickname set'):'Nickname cleared','ok'); loadFriends(); } }
 
-// invites: send uses the Match-tab room/size (or the server mints a private room)
+// invites: send uses the Match-tab room/size (or the server mints a private room). The sender then
+// WAITS — a "waiting to accept" card shows + we poll /invites/outgoing; when the friend accepts, BOTH
+// sides launch into the same room. Auto-cancels after 60s or if the friend declines.
+let _outInvites=[];                              // [{to, room, size, deadline}]
+let _outInviteTimer=null;
 async function inviteFriend(f){
   closeMenus();
   const room=(SAVE.settings.room||'').trim(), size=SAVE.settings.queue||2;
   const r=await sx('invite_send',{ to:f.name, room, size });
-  if(r && r.ok) toast('Invited '+f.name+' to a match','ok');
-  else toast((r && r.error) || 'Could not invite.','err');
+  if(!(r && r.ok)){ toast((r && r.error) || 'Could not invite.','err'); return; }
+  _outInvites = _outInvites.filter(o=>o.to!==f.name);
+  _outInvites.push({ to:f.name, disp:dispName(f), room:r.room_code||room, size:r.size||size, deadline:Date.now()+60000 });
+  toast('Invite sent to '+dispName(f)+' — waiting for them to accept…','ok');
+  renderInvites(); startInviteWatch();
+}
+function startInviteWatch(){ if(_outInviteTimer||!_outInvites.length) return;
+  _outInviteTimer=setInterval(pollOutgoingInvites, 3000); pollOutgoingInvites(); }
+function stopInviteWatch(){ if(_outInviteTimer){ clearInterval(_outInviteTimer); _outInviteTimer=null; } }
+async function pollOutgoingInvites(){
+  if(!_outInvites.length){ stopInviteWatch(); return; }
+  const now=Date.now();
+  // local 60s timeout → cancel server-side (so the friend's incoming card clears too) + drop the card
+  for(const o of _outInvites.slice()) if(now>o.deadline){
+    sx('invite_cancel',{ to:o.to }); _outInvites=_outInvites.filter(x=>x!==o);
+    toast('Invite to '+o.disp+' timed out','err');
+  }
+  if(!_outInvites.length){ stopInviteWatch(); renderInvites(); return; }
+  const r=await sx('invite_outgoing'); if(!(r && r.ok)){ renderInvites(); return; }
+  const live=new Map((r.invites||[]).map(i=>[i.to, i]));
+  for(const o of _outInvites.slice()){
+    const srv=live.get(o.to);
+    if(srv && srv.accepted){                      // accepted → launch the sender into the shared room
+      _outInvites=_outInvites.filter(x=>x!==o);
+      toast(o.disp+' accepted — launching!','ok');
+      play(srv.room_code||o.room, srv.size||o.size);
+    } else if(!srv){                              // row gone server-side = declined (or it expired)
+      _outInvites=_outInvites.filter(x=>x!==o);
+      toast(o.disp+' declined your invite','err');
+    }
+  }
+  if(!_outInvites.length) stopInviteWatch();
+  renderInvites();
+}
+function cancelInvite(name){
+  const o=_outInvites.find(x=>x.to===name);
+  _outInvites=_outInvites.filter(x=>x.to!==name); sx('invite_cancel',{ to:name });
+  if(!_outInvites.length) stopInviteWatch();
+  toast('Invite to '+((o&&o.disp)||name)+' cancelled','ok'); renderInvites();
 }
 async function acceptInvite(iv){
   const r=await sx('invite_respond',{ from:iv.from, accept:true });
@@ -654,8 +704,12 @@ function onCTA(){
     const count = Math.max(1, (SAVE.match.tsize||2) - 1);
     const room = SAVE.match.bot + ':' + SAVE.match.diff + (count>1 ? ':'+count : '');
     play(room, SAVE.match.tsize||2);         // transient room + arena size; never persisted
+  } else if(partyData && (partyData.members||[]).length>1){
+    // In a party → PLAY queues the WHOLE party together (leader starts it; members ready up).
+    if(partyData.is_leader){ partyStart(); }
+    else { toast('Your leader starts the match — you’re readied up.','ok'); partyReady(true); }
   } else {
-    play();                                  // human match: uses the typed room code
+    play();                                  // solo human match: uses the typed room code
   }
 }
 
@@ -897,8 +951,8 @@ async function play(roomOverride, queueOverride){
     // So PLAY stays disabled for the whole match (no 2nd instance), and we minimise meanwhile.
     // themed loading card: pass the selected element + party so the in-game cover matches the launcher
     const element = (SAVE.element || (typeof currentElement!=='undefined' ? currentElement : '') || 'air').toLowerCase();
-    const party = (partyData && partyData.party && partyData.party.members && partyData.party.members.length>1)
-      ? partyData.party.members.map(m=>m.name).join(', ') : '';
+    const party = (partyData && partyData.members && partyData.members.length>1)
+      ? partyData.members.map(m=>m.name).join(', ') : '';
     // Render the loading screen from the launcher's own tokens → BMP the in-game cover blits (so the
     // loader matches the launcher). Now a small PNG payload (the old raw-RGBA one stalled the webview).
     // Must finish BEFORE the game spawns so the image exists when the DLL loads. Never block launch on it.
@@ -1328,7 +1382,7 @@ function renderParty(party, invite){
     +`<button class="party-leave" title="Leave party">Leave</button>`;
   head.querySelector('.party-leave').onclick=partyLeave; wrap.appendChild(head);
   for(const m of party.members){
-    const row=document.createElement('div'); row.className='party-m '+(m.state||'offline');
+    const row=document.createElement('div'); row.className='party-m '+(m.state||'offline')+(m.leader?' leader':'')+(m.ready?' rdy':'');
     row.innerHTML=avatarHTML(m.name)+`<span class="dot"></span><b class="nm"></b>`
       +(m.leader?'<span class="crown" title="Leader">👑</span>':'')
       +`<span class="rd ${m.ready?'on':''}">${m.ready?'Ready':'…'}</span>`
@@ -1506,6 +1560,8 @@ if(!HAS_TAURI && /[?&]demo/.test(location.search)){
       else if(state==='career') openMyCareer();
       else if(state==='replay') openReplay('demo');
       else if(state==='party') pollParty();
+      else if(state==='partyinvite'){ pollParty().then(()=>setTimeout(()=>{ const s=document.querySelector('.party-slot'); if(s) s.click(); }, 120)); }
+      else if(state==='waiting'){ _outInvites.push({to:'KorraMain',disp:'KorraMain',room:'x',size:2,deadline:Date.now()+60000}); renderInvites(); }
       else if(state==='leaderboard') setView('ranks');
       else if(state==='help') $('cbHow').click();
       else if(state==='account') openDrawer();

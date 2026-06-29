@@ -1652,6 +1652,21 @@ async fn invite_respond(host: String, token: String, from: String, accept: bool)
 }
 
 #[tauri::command]
+async fn invite_outgoing(host: String, token: String) -> serde_json::Value {
+    // Sender polls this after inviting: accepted invites come back (one-shot) so both launch together.
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "GET", "/invites/outgoing", Some(&token), serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
+async fn invite_cancel(host: String, token: String, to: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/invites/cancel", Some(&token), serde_json::json!({"to": to}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
+#[tauri::command]
 async fn friends_recent(host: String, token: String) -> serde_json::Value {
     tauri::async_runtime::spawn_blocking(move ||
         gw_json(&host, "GET", "/friends/recent", Some(&token), serde_json::json!({}))
@@ -1788,7 +1803,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, invite_send, invite_respond, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start, account_forgot, account_change_password, account_delete, session_logout_all, os_notify, save_loading_image])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, invite_send, invite_respond, invite_outgoing, invite_cancel, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start, account_forgot, account_change_password, account_delete, session_logout_all, os_notify, save_loading_image])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
