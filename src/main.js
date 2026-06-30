@@ -57,6 +57,7 @@ const SAVE_KEY = 'la.save';
 const SAVE_DEFAULTS = { element:'fire', session:null,
   board:{ mode:'overall', nation:'fire' },
   match:{ bot:'korra', diff:'medium', tsize:2 },
+  char:{ attrs:{} },                         // assigned attribute points (Character tab)
   settings:{
     queue:4, room:'', server:DEFAULT_SERVER, res:'1440x1080',
     hd:false, fullscreen:true, skip_menu:false, gamescope:false, gamescope_args:'', proton:false } };
@@ -65,6 +66,7 @@ function loadSave(){
     return { ...SAVE_DEFAULTS, ...j,
       board:{ ...SAVE_DEFAULTS.board, ...(j.board||{}) },
       match:{ ...SAVE_DEFAULTS.match, ...(j.match||{}) },
+      char:{ ...SAVE_DEFAULTS.char, ...(j.char||{}), attrs:{ ...((j.char||{}).attrs||{}) } },
       settings:{ ...SAVE_DEFAULTS.settings, ...(j.settings||{}) } }; }
   catch{ return JSON.parse(JSON.stringify(SAVE_DEFAULTS)); }
 }
@@ -142,6 +144,7 @@ function setElement(el){
     s.classList.toggle('on', /el-(\w+)/.exec(s.getAttribute('class'))[1]===el));
   currentElement=el; initParticles();
   SAVE.element=el; persist();
+  if(typeof renderCharacter==='function' && typeof curView!=='undefined' && curView==='character') renderCharacter();
 }
 document.querySelectorAll('.elements .el').forEach(s=>{
   const el=/el-(\w+)/.exec(s.getAttribute('class'))[1];
@@ -161,6 +164,8 @@ function showChip(name){
   document.querySelector('.acct .nm').textContent = name || 'Sign in';
   document.querySelector('.acct .av').textContent = (name ? name[0] : '?').toUpperCase();
   if(typeof renderMe==='function') renderMe();
+  if(typeof syncCharTab==='function') syncCharTab();   // nav tab shows your character name
+  if(typeof renderCharacter==='function' && typeof curView!=='undefined' && curView==='character') renderCharacter();
 }
 acct.addEventListener('click', e=>{
   e.stopPropagation();
@@ -715,24 +720,82 @@ $('navSettings').addEventListener('click', e=>{ e.preventDefault(); toggleSettin
 
 // ── view router: Home / Match / Ranks ────────────────────────────────────────────
 // (Training is no longer its own view — it's the "Bot Game" mode inside Match.)
-const NAV = { home:'navHome', match:'navMatch', ranks:'navNews' };   // left links only
+const NAV = { home:'navHome', character:'navCharacter', match:'navMatch', ranks:'navNews' };   // left links
 let curView = 'home';
 function setView(v){
   curView = v;
-  for(const id of ['home','match','ranks','settings']) $('view-'+id).hidden = (id !== v);
+  for(const id of ['home','character','match','ranks','settings']) $('view-'+id).hidden = (id !== v);
   document.querySelectorAll('.nav > a').forEach(a=>a.classList.remove('on'));
   if(NAV[v]) $(NAV[v]).classList.add('on');
   $('navSettings').classList.toggle('on', v==='settings');           // the top-right gear pill
   if(v==='ranks') renderBoard();
   if(v==='match') syncMatch();
   if(v==='settings') syncDrawer();
+  if(v==='character') renderCharacter();
   if(v==='home' && typeof loadFriends==='function') loadFriends();
   if(typeof setStatus==='function' && !_inGame) setStatus(v==='settings' ? 'in settings' : 'in lobby');
   updateCTA();
 }
 $('navHome').addEventListener('click', e=>{ e.preventDefault(); setView('home'); });
+$('navCharacter').addEventListener('click', e=>{ e.preventDefault(); setView('character'); });
 $('navMatch').addEventListener('click', e=>{ e.preventDefault(); setView('match'); });
 $('navNews').addEventListener('click', e=>{ e.preventDefault(); setView('ranks'); });
+
+// ── Character tab: radial element selector + bending loadout + assignable attributes ──────
+// Scaffolding for the in-game character (loadout/attrs are local previews for now). The radial
+// re-themes the launcher to the chosen nation (setElement); the tab + roster pull your name.
+const NATIONS = { fire:'Firebender', water:'Waterbender', earth:'Earthbender', air:'Airbender' };
+const BEND_SKILLS = {
+  fire: ['Fire Blast','Flame Lash','Heat Wave','Meteor'],
+  water:['Water Jet','Ice Spike','Tide Pull','Tsunami'],
+  earth:['Boulder','Rock Wall','Tremor','Avalanche'],
+  air:  ['Air Blast','Wind Slice','Cyclone','Tempest'],
+};
+const CHAR_ATTRS = [['power','Power'],['speed','Speed'],['defense','Defense'],['chi','Chi'],['vitality','Vitality']];
+const ATTR_BASE = 3, ATTR_MAX = 10, ATTR_POOL = 5;
+const charName = () => (SAVE.session && SAVE.session.name) || 'Character';
+function syncCharTab(){ const a=$('navCharacter'); if(a) a.textContent = charName(); }
+function renderRoster(){
+  const nm=charName(), host=$('charRoster'); if(!host) return;
+  host.innerHTML =
+    `<button class="char-slot on" title="${esc(nm)}"><span class="cs-av" style="--ah:${nameHue(nm)}">${initials(nm)}</span></button>`
+    + `<button class="char-slot add" title="New character — coming soon">+</button>`;
+}
+function renderLoadout(){
+  const el=SAVE.element, names=BEND_SKILLS[el]||BEND_SKILLS.fire, host=$('loadout'); if(!host) return;
+  host.innerHTML = names.map((n,i)=>
+    `<button class="skill" title="${esc(n)} — loadout editing coming soon">`
+    + `<span class="sk-key">${i+1}</span>`
+    + `<span class="sk-ic"><svg class="el el-${el}" width="26" height="26"><use href="#el-${el}"/></svg></span>`
+    + `<b>${esc(n)}</b><small>Skill</small></button>`).join('');
+}
+function renderAttrs(){
+  const a=SAVE.char.attrs||(SAVE.char.attrs={}), host=$('attrs'); if(!host) return;
+  const assigned=CHAR_ATTRS.reduce((s,[k])=>s+(a[k]||0),0), pool=ATTR_POOL-assigned;
+  const pe=$('attrPoints'); if(pe){ pe.textContent=pool+' point'+(pool===1?'':'s'); pe.classList.toggle('spent',pool<=0); }
+  host.innerHTML = CHAR_ATTRS.map(([k,label])=>{
+    const v=ATTR_BASE+(a[k]||0), pct=Math.round(v/ATTR_MAX*100);
+    return `<div class="attr" data-k="${k}"><span class="attr-name">${label}</span>`
+      + `<span class="attr-bar"><span class="attr-fill" style="width:${pct}%"></span></span>`
+      + `<span class="attr-ctl"><button class="attr-btn dec"${(a[k]||0)<=0?' disabled':''}>&minus;</button>`
+      + `<span class="attr-val">${v}</span>`
+      + `<button class="attr-btn inc"${(pool<=0||v>=ATTR_MAX)?' disabled':''}>+</button></span></div>`;
+  }).join('');
+}
+function renderCharacter(){
+  $('charName').textContent = charName();
+  $('charElement').textContent = NATIONS[SAVE.element] || 'Choose your bending';
+  const em=$('crEmblem'); if(em){ em.setAttribute('class','el el-'+SAVE.element+' cr-emblem'); em.querySelector('use').setAttribute('href','#el-'+SAVE.element); }
+  document.querySelectorAll('#charRadial .cr-node').forEach(n=>n.classList.toggle('on', n.dataset.el===SAVE.element));
+  renderRoster(); renderLoadout(); renderAttrs();
+}
+$('charRadial').addEventListener('click', e=>{ const n=e.target.closest('.cr-node'); if(n){ setElement(n.dataset.el); renderCharacter(); } });
+$('attrs').addEventListener('click', e=>{ const b=e.target.closest('.attr-btn'); if(!b||b.disabled) return;
+  const k=b.closest('.attr').dataset.k, a=SAVE.char.attrs;
+  if(b.classList.contains('inc')) a[k]=(a[k]||0)+1; else a[k]=Math.max(0,(a[k]||0)-1);
+  persist(); renderAttrs(); });
+$('loadout').addEventListener('click', e=>{ if(e.target.closest('.skill')) toast('Loadout editing is coming soon.','ok'); });
+$('charRoster').addEventListener('click', e=>{ if(e.target.closest('.char-slot.add')) toast('Multiple custom characters are coming soon.','ok'); });
 
 // The bottom-right button is one contextual CTA:
 //   Home / Ranks  → "MATCH"   (jump to the Match tab)
@@ -1722,6 +1785,7 @@ if(!HAS_TAURI && /[?&]demo/.test(location.search)){
       else if(state==='waiting'){ _outInvites.push({to:'KorraMain',disp:'KorraMain',room:'x',size:2,deadline:Date.now()+60000}); renderInvites(); }
       else if(state==='leaderboard') setView('ranks');
       else if(state==='match'){ setView('match'); }
+      else if(state==='character'){ setView('character'); }
       else if(state==='training' || state==='bots'){ setView('match'); setPlayMode('bots'); }
       else if(state==='ranked'){ setView('match'); setPlayMode('ranked');
         setTimeout(()=>renderRankCard({ok:true,ranked:true,tier_name:'Gold',division_name:'II',lp:64,rating:1340,wins:23,losses:17,streak:3}), 60); }

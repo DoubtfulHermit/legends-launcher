@@ -40,6 +40,7 @@
   <!-- nav -->
   <nav class="nav">
     <a href="#" class="on" id="navHome">Home</a>
+    <a href="#" id="navCharacter">Character</a>
     <a href="#" id="navMatch">Match</a>
     <a href="#" id="navNews">Leaderboard</a>
     <div class="nav-right">
@@ -75,6 +76,42 @@
           <button class="cbtn" id="cbHow">&#9654; How to play</button>
           <button class="cbtn" id="cbDiscord" hidden>&#128172; Discord</button>
           <button class="cbtn" id="cbSite" hidden>&#127760; Website</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- CHARACTER: radial element selector + identity + roster · bending loadout + attributes -->
+    <section class="view view--character" id="view-character" hidden>
+      <div class="char-view">
+        <aside class="char-left">
+          <div class="char-radial" id="charRadial">
+            <span class="cr-ring"></span>
+            <button class="cr-node" data-el="fire"  title="Fire"><svg class="el el-fire"><use href="#el-fire"/></svg></button>
+            <button class="cr-node" data-el="air"   title="Air"><svg class="el el-air"><use href="#el-air"/></svg></button>
+            <button class="cr-node" data-el="water" title="Water"><svg class="el el-water"><use href="#el-water"/></svg></button>
+            <button class="cr-node" data-el="earth" title="Earth"><svg class="el el-earth"><use href="#el-earth"/></svg></button>
+            <div class="cr-hub"><svg class="el cr-emblem" id="crEmblem"><use href="#el-fire"/></svg></div>
+          </div>
+          <div class="char-id">
+            <b id="charName">Character</b>
+            <small id="charElement">Choose your bending</small>
+          </div>
+          <div class="char-roster">
+            <span class="cr-label">Characters</span>
+            <div class="cr-slots" id="charRoster"></div>
+          </div>
+        </aside>
+
+        <div class="char-detail">
+          <div class="char-card">
+            <div class="cc-head"><svg class="ic" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><span>Bending Loadout</span><small>Your 4 active skills in the arena</small></div>
+            <div class="loadout" id="loadout"></div>
+          </div>
+          <div class="char-card">
+            <div class="cc-head"><svg class="ic" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg><span>Attributes</span><span class="cc-points" id="attrPoints">0 points</span></div>
+            <div class="attrs" id="attrs"></div>
+            <div class="cc-foot" id="attrFoot">Spend points to shape your bender. (Preview — saved locally for now.)</div>
+          </div>
         </div>
       </div>
     </section>
