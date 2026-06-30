@@ -673,8 +673,7 @@ $('liUser').addEventListener('keydown', e=>{ if(e.key==='Enter') $('liPass').foc
 $('liServer').addEventListener('input', ()=>{ SAVE.settings.server=$('liServer').value.trim(); saveSettings(); });
 $('amSignout').addEventListener('click', signOut);
 
-// ── settings drawer ──────────────────────────────────────────────────────────
-const drawer=$('drawer'), scrim=$('scrim');
+// ── settings (now a content view, opened by the top-right gear pill) ───────────
 function buildResolutions(){
   const sel=$('stRes'); sel.innerHTML='';
   (resolutions.length?resolutions:FALLBACK.load.resolutions).forEach(([w,h])=>{
@@ -705,36 +704,41 @@ function syncDrawer(){
   $('gsRow').hidden = !gsAvailable;
   $('ptRow').hidden = !ptAvailable;
 }
-function openDrawer(){ syncDrawer(); drawer.classList.add('open'); scrim.classList.add('show'); if(!_inGame) setStatus('in settings'); }
-function closeDrawer(){ drawer.classList.remove('open'); scrim.classList.remove('show'); if(!_inGame) setStatus('in lobby'); }
-$('navSettings').addEventListener('click', e=>{ e.preventDefault(); openDrawer(); });
+// Settings is a view now, TOGGLED by the titlebar gear (like the social panel): click to
+// open, click again to return to the view you came from.
+let _viewBeforeSettings = 'home';
+function openSettings(){ if(curView!=='settings'){ _viewBeforeSettings = curView; setView('settings'); } }
+function toggleSettings(){ if(curView==='settings') setView(_viewBeforeSettings); else openSettings(); }
+function openDrawer(){ openSettings(); }                 // legacy call sites (account menu, demo)
+function closeDrawer(){ if(curView==='settings') setView(_viewBeforeSettings); }
+$('navSettings').addEventListener('click', e=>{ e.preventDefault(); toggleSettings(); });
 
-// ── view router: Home / Match / Training / Ranks ────────────────────────────────
-const NAV = { home:'navHome', match:'navMatch', training:'navTraining', ranks:'navNews' };
+// ── view router: Home / Match / Ranks ────────────────────────────────────────────
+// (Training is no longer its own view — it's the "Bot Game" mode inside Match.)
+const NAV = { home:'navHome', match:'navMatch', ranks:'navNews' };   // left links only
 let curView = 'home';
 function setView(v){
   curView = v;
-  for(const id of ['home','match','training','ranks']) $('view-'+id).hidden = (id !== v);
+  for(const id of ['home','match','ranks','settings']) $('view-'+id).hidden = (id !== v);
   document.querySelectorAll('.nav > a').forEach(a=>a.classList.remove('on'));
-  $(NAV[v]).classList.add('on');
+  if(NAV[v]) $(NAV[v]).classList.add('on');
+  $('navSettings').classList.toggle('on', v==='settings');           // the top-right gear pill
   if(v==='ranks') renderBoard();
   if(v==='match') syncMatch();
-  if(v==='training') syncTraining();
+  if(v==='settings') syncDrawer();
   if(v==='home' && typeof loadFriends==='function') loadFriends();
+  if(typeof setStatus==='function' && !_inGame) setStatus(v==='settings' ? 'in settings' : 'in lobby');
   updateCTA();
 }
 $('navHome').addEventListener('click', e=>{ e.preventDefault(); setView('home'); });
 $('navMatch').addEventListener('click', e=>{ e.preventDefault(); setView('match'); });
-$('navTraining').addEventListener('click', e=>{ e.preventDefault(); setView('training'); });
 $('navNews').addEventListener('click', e=>{ e.preventDefault(); setView('ranks'); });
 
 // The bottom-right button is one contextual CTA:
 //   Home / Ranks  → "MATCH"   (jump to the Match tab)
-//   Match (quick/custom) → "PLAY"        Match (ranked) → "PLAY RANKED" / "SEARCHING…"
-//   Training      → "PLAY"    (start a match vs AI)
-let _playMode = 'quick';                      // quick | ranked | custom (set from SAVE on load)
+//   Match (quick/custom/bots) → "PLAY"   Match (ranked) → "PLAY RANKED" / "SEARCHING…"
+let _playMode = 'quick';                      // quick | ranked | custom | bots (set from SAVE on load)
 function ctaMode(){
-  if(curView==='training') return 'play';
   if(curView==='match') return _playMode==='ranked' ? 'ranked' : 'play';
   if(curView==='home') return 'goto';
   return 'hidden';                           // ranks: viewing only — no action button
@@ -751,13 +755,13 @@ function onCTA(){
   const m=ctaMode();
   if(m==='hidden') return;
   if(m==='goto'){ setView('match'); return; }
-  if(curView==='training'){
+  // Match view — act on the selected mode.
+  if(_playMode==='bots'){                      // Bot Game: 1 human + N AI (transient room, never persisted)
     const count = Math.max(1, (SAVE.match.tsize||2) - 1);
     const room = SAVE.match.bot + ':' + SAVE.match.diff + (count>1 ? ':'+count : '');
-    play(room, SAVE.match.tsize||2);         // transient room + arena size; never persisted
+    play(room, SAVE.match.tsize||2);
     return;
   }
-  // Match view — act on the selected mode.
   if(_playMode==='ranked'){ if(!_rankedSearching) rankedQueue(); return; }
   if(partyData && (partyData.members||[]).length>1){
     // In a party → PLAY queues the WHOLE party together (leader starts it; members ready up).
@@ -771,14 +775,15 @@ function onCTA(){
 
 // ── Match modes (Quick / Ranked / Custom) ───────────────────────────────────────
 function setPlayMode(mode){
-  _playMode = (['quick','ranked','custom'].includes(mode)) ? mode : 'quick';
+  _playMode = (['quick','ranked','custom','bots'].includes(mode)) ? mode : 'quick';
   // persist() ONLY — playMode is a launcher-UI setting, NOT a game file. Using saveSettings() here
   // scheduled a debounced invoke('save') that overwrote arena_link.ini's room with the saved (empty)
   // code ~300ms later, clobbering a transient Training/bot code mid-launch. (Bug fix: empty bot queue.)
   SAVE.settings.playMode = _playMode; persist();
   document.querySelectorAll('#modeList .mode-card').forEach(c=>c.classList.toggle('on', c.dataset.mode===_playMode));
-  for(const k of ['quick','ranked','custom']){ const p=$('pane-'+k); if(p) p.classList.toggle('on', k===_playMode); }
+  for(const k of ['quick','ranked','custom','bots']){ const p=$('pane-'+k); if(p) p.classList.toggle('on', k===_playMode); }
   if(_playMode==='ranked') loadMyRank();
+  if(_playMode==='bots') syncTraining();       // render the arena-size / bot / difficulty controls
   updateCTA();
 }
 function syncMatch(){
@@ -859,9 +864,7 @@ $('tDiff').addEventListener('click', e=>{ const b=e.target.closest('button'); if
   SAVE.match.diff=b.dataset.d; persist(); syncTraining(); });
 $('tBots').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return;
   SAVE.match.bot=b.dataset.bot; persist(); syncTraining(); });
-$('amSettings').addEventListener('click', ()=>{ acctMenu.classList.remove('open'); openDrawer(); });
-$('drawerClose').addEventListener('click', closeDrawer);
-scrim.addEventListener('click', closeDrawer);
+$('amSettings').addEventListener('click', ()=>{ acctMenu.classList.remove('open'); openSettings(); });
 $('stServer').addEventListener('input', e=>{ SAVE.settings.server=e.target.value; saveSettings(); });
 $('stRes').addEventListener('change', e=>{ SAVE.settings.res=e.target.value; saveSettings(); });
 $('stFs').addEventListener('click', ()=>{ SAVE.settings.fullscreen=!SAVE.settings.fullscreen; saveSettings(); syncDrawer(); });
@@ -881,11 +884,21 @@ $('stHd').addEventListener('click', async ()=>{
 });
 
 // ── service status polling ───────────────────────────────────────────────────
+// Each service drives a row in the titlebar drop-down; the indicator dot shows the
+// WORST of them (down > unknown > good) so a single glance tells you if anything's off.
+const _svc = { gateway:null, database:null, game_server:null };
 function setSvc(name, up){
-  const el=document.querySelector(`.pill[data-svc="${name}"]`); if(!el) return;
-  el.classList.remove('off','unknown');
-  if(up===null) el.classList.add('unknown'); else if(!up) el.classList.add('off');
+  _svc[name] = up;
+  const row=document.querySelector(`.sd-row[data-svc="${name}"]`);
+  if(row){ row.classList.remove('off','unknown'); if(up===null) row.classList.add('unknown'); else if(!up) row.classList.add('off'); }
+  const ind=$('statusInd'); if(!ind) return;
+  const vals=Object.values(_svc);
+  const agg = vals.some(v=>v===false) ? 'down' : vals.some(v=>v===null) ? 'unknown' : 'good';
+  ind.classList.remove('good','down','unknown'); ind.classList.add(agg);
+  const b=$('statusBtn'); if(b) b.title = agg==='down' ? 'A service is down' : agg==='unknown' ? 'Checking server…' : 'All systems live';
 }
+$('statusBtn').addEventListener('click', e=>{ e.stopPropagation(); $('statusInd').classList.toggle('open'); });
+document.addEventListener('click', ()=>$('statusInd')?.classList.remove('open'));
 let statusDebounce, _wasReachable=true;
 async function pollStatus(){
   if(document.hidden) return;   // don't poll the network while minimised
@@ -1709,7 +1722,7 @@ if(!HAS_TAURI && /[?&]demo/.test(location.search)){
       else if(state==='waiting'){ _outInvites.push({to:'KorraMain',disp:'KorraMain',room:'x',size:2,deadline:Date.now()+60000}); renderInvites(); }
       else if(state==='leaderboard') setView('ranks');
       else if(state==='match'){ setView('match'); }
-      else if(state==='training'){ setView('training'); }
+      else if(state==='training' || state==='bots'){ setView('match'); setPlayMode('bots'); }
       else if(state==='ranked'){ setView('match'); setPlayMode('ranked');
         setTimeout(()=>renderRankCard({ok:true,ranked:true,tier_name:'Gold',division_name:'II',lp:64,rating:1340,wins:23,losses:17,streak:3}), 60); }
       else if(state==='custom'){ setView('match'); setPlayMode('custom'); }

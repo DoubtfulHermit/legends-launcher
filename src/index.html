@@ -23,6 +23,17 @@
   <header class="chrome" data-tauri-drag-region>
     <div class="brand" data-tauri-drag-region><span class="tri">&#9651;</span>LEGENDS&nbsp;AWAKENED</div>
     <div class="spacer" data-tauri-drag-region></div>
+    <div class="status-ind unknown" id="statusInd">
+      <button class="status-btn" id="statusBtn" title="Server status" aria-label="Server status"><span class="sdot"></span></button>
+      <div class="status-drop" id="statusDrop">
+        <div class="sd-row" data-svc="gateway"><i></i><span>Gateway</span></div>
+        <div class="sd-row" data-svc="database"><i></i><span>Database</span></div>
+        <div class="sd-row" data-svc="game_server"><i></i><span>Arena</span></div>
+      </div>
+    </div>
+    <button class="chrome-set" id="navSettings" title="Settings" aria-label="Settings">
+      <svg class="ic" viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
     <div class="win"><b id="min" title="Minimize">&#8211;</b><b id="max" title="Maximize">&#9723;</b><b class="x" id="close" title="Close">&#10005;</b></div>
   </header>
 
@@ -30,9 +41,7 @@
   <nav class="nav">
     <a href="#" class="on" id="navHome">Home</a>
     <a href="#" id="navMatch">Match</a>
-    <a href="#" id="navTraining">Training</a>
     <a href="#" id="navNews">Leaderboard</a>
-    <a href="#" id="navSettings">Settings</a>
     <div class="nav-right">
       <div class="elements" title="Choose your element">
         <svg class="el el-fire" title="Fire"><use href="#el-fire"/></svg>
@@ -91,6 +100,10 @@
               <span class="mode-ic"><svg class="ic" viewBox="0 0 24 24"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg></span>
               <span class="mode-tx"><b>Custom Room</b><small>Private match by code</small></span>
             </button>
+            <button class="mode-card" data-mode="bots">
+              <span class="mode-ic"><svg class="ic" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4"/><circle cx="12" cy="3" r="1"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/><path d="M9 17h6"/><line x1="2" y1="13" x2="2" y2="15"/><line x1="22" y1="13" x2="22" y2="15"/></svg></span>
+              <span class="mode-tx"><b>Bot Game</b><small>Practice vs AI</small></span>
+            </button>
           </aside>
           <div class="mode-detail">
             <svg class="pane-el theme-el" aria-hidden="true"><use href="#el-fire"/></svg>
@@ -130,31 +143,24 @@
               </div>
               <div class="mp-foot">Hit <b>Play</b> to create or join the room.</div>
             </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- TRAINING: practice vs AI -->
-    <section class="view view--training" id="view-training" hidden>
-      <div class="match">
-        <div class="m-title">Training</div>
-        <div class="m-sub">Practice against AI opponents &mdash; no rank, no stakes.</div>
-        <div class="m-card">
-          <svg class="pane-el theme-el" aria-hidden="true"><use href="#el-fire"/></svg>
-          <div class="field"><label>Arena size</label>
-            <div class="seg seg--lbl" id="tSeg">
-              <button data-q="2"><b>1v1</b><small>One bot</small></button>
-              <button data-q="3"><b>1v2</b><small>Two bots</small></button>
-              <button data-q="4"><b>1v3</b><small>Three bots</small></button>
+            <!-- BOT GAME (was the Training tab — now a Match mode) -->
+            <div class="mode-pane" id="pane-bots">
+              <div class="mp-head"><h3>Bot Game</h3><p>Practice against AI opponents &mdash; no rank, no stakes.</p></div>
+              <div class="field"><label>Arena size</label>
+                <div class="seg seg--lbl" id="tSeg">
+                  <button data-q="2"><b>1v1</b><small>One bot</small></button>
+                  <button data-q="3"><b>1v2</b><small>Two bots</small></button>
+                  <button data-q="4"><b>1v3</b><small>Three bots</small></button>
+                </div>
+              </div>
+              <div class="field"><label>AI opponent</label><div class="m-bots" id="tBots"></div></div>
+              <div class="field"><label>Difficulty</label>
+                <div class="seg" id="tDiff"><button data-d="easy">Easy</button><button data-d="medium" class="on">Medium</button><button data-d="hard">Hard</button></div>
+              </div>
+              <div class="mp-foot">Hit <b>Play</b> to start the bot game.</div>
             </div>
           </div>
-          <div class="field"><label>AI opponent</label><div class="m-bots" id="tBots"></div></div>
-          <div class="field"><label>Difficulty</label>
-            <div class="seg" id="tDiff"><button data-d="easy">Easy</button><button data-d="medium" class="on">Medium</button><button data-d="hard">Hard</button></div>
-          </div>
         </div>
-        <div class="m-hint">Hit <b>Play</b> below to start training.</div>
       </div>
     </section>
 
@@ -174,6 +180,77 @@
           <svg class="el el-air" title="Air"><use href="#el-air"/></svg>
         </div>
         <div class="lb-list" id="lbList"></div>
+      </div>
+    </section>
+
+    <!-- SETTINGS: a content view (opened by the top-right gear pill) — same card idiom as Match -->
+    <section class="view view--settings" id="view-settings" hidden>
+      <div class="settings-view">
+        <div class="play-head">
+          <h2 class="play-title">Settings</h2>
+          <p class="play-sub">Saved automatically on this machine.</p>
+        </div>
+        <div class="dr-me" id="drMe" hidden>
+          <span class="fr-av" id="drMeAv" style="--ah:30">?</span>
+          <span class="dr-me-dot"></span>
+          <div class="dr-me-id"><b id="drMeName">Guest</b><small id="drMeState">Offline</small></div>
+        </div>
+        <div class="settings-grid">
+          <div class="settings-col">
+          <div class="dr-card">
+            <div class="dr-card-h"><svg class="ic" viewBox="0 0 24 24"><path d="M21 2l-5.5 5.5"/><path d="M16 7l3 3"/><circle cx="8.5" cy="15.5" r="5.5"/><path d="M12.4 11.6L19 5"/></svg><span>Sign-in</span></div>
+            <div class="row"><div class="rl"><b>Auto sign-in</b>
+              <small>On PLAY, logs you into the game automatically with your launcher account &mdash; no typing your password again. You still pick your match and queue yourself.</small></div>
+              <div class="tg" id="stSkip"></div></div>
+          </div>
+
+          <div class="dr-card" id="acctSec" hidden>
+            <div class="dr-card-h"><svg class="ic" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>Account</span></div>
+            <div class="acctbox" id="acctBox" hidden>
+              <div class="field"><label>Change password</label>
+                <input id="apCur" type="password" placeholder="current password" autocomplete="current-password">
+                <input id="apNew" type="password" placeholder="new password" autocomplete="new-password"></div>
+              <button class="btn ghost" id="apGo">Update password</button>
+              <div class="hint" id="apMsg"></div>
+              <button class="btn ghost" id="apLogoutAll" style="margin-top:12px">Sign out everywhere</button>
+              <button class="btn ghost danger" id="apDelete" style="margin-top:10px">Delete account&hellip;</button>
+              <div class="apdel" id="apDel" hidden>
+                <div class="field" style="margin-top:12px"><label>This is permanent. Type your password to confirm.</label>
+                  <input id="apDelPw" type="password" placeholder="password"></div>
+                <button class="btn danger" id="apDelGo">Permanently delete my account</button>
+              </div>
+            </div>
+          </div>
+          </div>
+
+          <div class="settings-col">
+          <div class="dr-card">
+            <div class="dr-card-h"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg><span>Display</span></div>
+            <div class="field"><label>Resolution</label>
+              <select id="stRes"></select></div>
+            <div class="row"><div class="rl"><b>Fullscreen</b><small id="fsHint">borderless, centered on your display</small></div>
+              <div class="tg" id="stFs"></div></div>
+            <div class="row" id="hdRow" hidden><div class="rl"><b>HD textures</b><small id="hdHint">AI-upscaled arena set &middot; next launch</small></div>
+              <div class="tg" id="stHd"></div></div>
+          </div>
+
+          <div class="dr-card">
+            <div class="dr-card-h"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg><span>Connection</span></div>
+            <div class="field" style="margin-bottom:0"><label>Server</label><input id="stServer" placeholder="gw.legends-awakened.com"></div>
+          </div>
+
+          <div class="dr-card">
+            <div class="dr-card-h"><svg class="ic" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg><span>Advanced</span></div>
+            <div class="row" id="ptRow" hidden><div class="rl"><b>Run with Proton</b><small>DXVK via umu-run — smoother graphics on Linux (recommended)</small></div>
+              <div class="tg" id="stProton"></div></div>
+            <div class="row" id="gsRow" hidden><div class="rl"><b>Gamescope</b><small>Wayland / hybrid-GPU wrapper (Linux)</small></div>
+              <div class="tg" id="stGs"></div></div>
+            <input id="stGsArgs" class="gsargs" hidden placeholder="-W 1920 -H 1080  (hybrid GPU? --prefer-vk-device 1002:1638)">
+            <button class="btn ghost" id="checkUpdates" style="margin-top:14px"><span id="updateText">Check for updates</span></button>
+          </div>
+          </div>
+        </div>
+        <div class="ver" id="drawerVer"></div>
       </div>
     </section>
   </div>
@@ -217,11 +294,6 @@
   <div class="bar">
     <div class="status">
       <div class="online"><span class="dot"></span><b id="players">&mdash;</b><small>PLAYERS ONLINE</small></div>
-      <div class="pills">
-        <div class="pill unknown" data-svc="gateway"><i></i>Gateway</div>
-        <div class="pill unknown" data-svc="database"><i></i>Database</div>
-        <div class="pill unknown" data-svc="game_server"><i></i>Arena</div>
-      </div>
       <div class="ver" id="version">Legends Awakened</div>
     </div>
     <div class="play-wrap">
@@ -247,71 +319,6 @@
     <button class="danger" id="amSignout"><svg class="ic" viewBox="0 0 24 24" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>Sign out</span></button>
   </div>
 
-  <!-- settings drawer -->
-  <div class="scrim" id="scrim"></div>
-  <aside class="drawer" id="drawer">
-    <div class="dr-top">
-      <h3>Settings</h3>
-      <button class="x" id="drawerClose" aria-label="Close">&#10005;</button>
-    </div>
-    <div class="dr-me" id="drMe" hidden>
-      <span class="fr-av" id="drMeAv" style="--ah:30">?</span>
-      <span class="dr-me-dot"></span>
-      <div class="dr-me-id"><b id="drMeName">Guest</b><small id="drMeState">Offline</small></div>
-    </div>
-    <div class="ds">Saved automatically on this machine. Match &amp; training options live on their own tabs.</div>
-
-    <div class="dr-card">
-      <div class="dr-card-h"><svg class="ic" viewBox="0 0 24 24"><path d="M21 2l-5.5 5.5"/><path d="M16 7l3 3"/><circle cx="8.5" cy="15.5" r="5.5"/><path d="M12.4 11.6L19 5"/></svg><span>Sign-in</span></div>
-      <div class="row"><div class="rl"><b>Auto sign-in</b>
-        <small>On PLAY, logs you into the game automatically with your launcher account &mdash; no typing your password again. You still pick your match and queue yourself.</small></div>
-        <div class="tg" id="stSkip"></div></div>
-    </div>
-
-    <div class="dr-card" id="acctSec" hidden>
-      <div class="dr-card-h"><svg class="ic" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>Account</span></div>
-      <div class="acctbox" id="acctBox" hidden>
-        <div class="field"><label>Change password</label>
-          <input id="apCur" type="password" placeholder="current password" autocomplete="current-password">
-          <input id="apNew" type="password" placeholder="new password" autocomplete="new-password"></div>
-        <button class="btn ghost" id="apGo">Update password</button>
-        <div class="hint" id="apMsg"></div>
-        <button class="btn ghost" id="apLogoutAll" style="margin-top:12px">Sign out everywhere</button>
-        <button class="btn ghost danger" id="apDelete" style="margin-top:10px">Delete account&hellip;</button>
-        <div class="apdel" id="apDel" hidden>
-          <div class="field" style="margin-top:12px"><label>This is permanent. Type your password to confirm.</label>
-            <input id="apDelPw" type="password" placeholder="password"></div>
-          <button class="btn danger" id="apDelGo">Permanently delete my account</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="dr-card">
-      <div class="dr-card-h"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg><span>Display</span></div>
-      <div class="field"><label>Resolution</label>
-        <select id="stRes"></select></div>
-      <div class="row"><div class="rl"><b>Fullscreen</b><small id="fsHint">borderless, centered on your display</small></div>
-        <div class="tg" id="stFs"></div></div>
-      <div class="row" id="hdRow" hidden><div class="rl"><b>HD textures</b><small id="hdHint">AI-upscaled arena set &middot; next launch</small></div>
-        <div class="tg" id="stHd"></div></div>
-    </div>
-
-    <div class="dr-card">
-      <div class="dr-card-h"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg><span>Connection</span></div>
-      <div class="field" style="margin-bottom:0"><label>Server</label><input id="stServer" placeholder="gw.legends-awakened.com"></div>
-    </div>
-
-    <div class="dr-card">
-      <div class="dr-card-h"><svg class="ic" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg><span>Advanced</span></div>
-      <div class="row" id="ptRow" hidden><div class="rl"><b>Run with Proton</b><small>DXVK via umu-run — smoother graphics on Linux (recommended)</small></div>
-        <div class="tg" id="stProton"></div></div>
-      <div class="row" id="gsRow" hidden><div class="rl"><b>Gamescope</b><small>Wayland / hybrid-GPU wrapper (Linux)</small></div>
-        <div class="tg" id="stGs"></div></div>
-      <input id="stGsArgs" class="gsargs" hidden placeholder="-W 1920 -H 1080  (hybrid GPU? --prefer-vk-device 1002:1638)">
-      <button class="btn ghost" id="checkUpdates" style="margin-top:14px"><span id="updateText">Check for updates</span></button>
-    </div>
-    <div class="ver" id="drawerVer"></div>
-  </aside>
 
   <!-- login gate -->
   <div class="login" id="login">
