@@ -976,9 +976,11 @@ async fn check_updates(host: String) -> UpdateCheck {
     // Launcher self-update is handled by the updater plugin (GitHub Releases); check_updates
     // now only covers game CONTENT (DLLs/textures) that differ from the gateway manifest —
     // which the launcher CAN safely patch into the user-writable clone, with the user's OK.
-    if let Some(dir) = resolve_game_dir() {
-        if let Some((manifest, _)) = fetch_manifest(&agent, host) {
-            reached = true;
+    // Reachability is judged by the manifest fetch ALONE, not by whether the game is installed,
+    // so a machine without the game (e.g. macOS) reports "up to date" — not a false "unreachable".
+    if let Some((manifest, _)) = fetch_manifest(&agent, host) {
+        reached = true;
+        if let Some(dir) = resolve_game_dir() {
             for f in &manifest.files {
                 if safe_rel(&f.path) && file_differs(&dir.join(&f.path), f) {
                     out.content_files += 1;
