@@ -1221,6 +1221,10 @@ fn spawn_game(dir: &Path, exe_path: &Path, auto_login: bool, gamescope: bool, ga
                 cmd.arg("gamescope").current_dir(dir);
                 if std::env::var_os("WAYLAND_DISPLAY").is_some() { cmd.args(["--backend", "wayland"]); }
                 cmd.args(["-w", &width.max(640).to_string(), "-h", &height.max(480).to_string(), "-S", "fit", "-f"]);
+                // NOTE: no --force-grab-cursor here — it pins gamescope to relative mode EVERYWHERE,
+                // which breaks the (absolute, clickable) menu. The in-arena camera fix is done in
+                // zz_quickmatch.dll instead: it hides the OS cursor only while the arena is live, so
+                // gamescope auto-flips to relative in-game and back to absolute in menus.
                 cmd.arg("--").arg("env");
                 cmd.arg("GAMEID=umu-avatar");
                 cmd.arg("AVATAR_UNDER_GAMESCOPE=1");   // tell the DLL it's in gamescope's isolated session
