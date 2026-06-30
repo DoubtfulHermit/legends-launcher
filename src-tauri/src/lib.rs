@@ -83,6 +83,41 @@ fn app_home() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share")))
         .map(|d| d.join("LegendsAwakened"))
 }
+
+// ── diagnostic log ───────────────────────────────────────────────────────────
+// Persistent, append-only log at %LOCALAPPDATA%\LegendsAwakened\launcher.log so a
+// player whose Check-for-updates/Play "does nothing" can send us the actual reason
+// (detection, clone, network, AV-blocked write). Dependency-free UTC timestamp.
+fn log_path() -> Option<PathBuf> { app_home().map(|d| d.join("launcher.log")) }
+fn utc_stamp() -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs()).unwrap_or(0) as i64;
+    let (days, tod) = (secs.div_euclid(86400), secs.rem_euclid(86400));
+    let (h, mi, s) = (tod / 3600, (tod % 3600) / 60, tod % 60);
+    // civil date from epoch days (Howard Hinnant), UTC, no crates
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let mut y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    if m <= 2 { y += 1; }
+    format!("{y:04}-{m:02}-{d:02} {h:02}:{mi:02}:{s:02}Z")
+}
+fn log_line(msg: &str) {
+    if let Some(p) = log_path() {
+        if let Some(parent) = p.parent() { let _ = fs::create_dir_all(parent); }
+        use std::io::Write;
+        // keep the log from growing unbounded: truncate if it ever passes ~256 KB
+        if fs::metadata(&p).map(|m| m.len() > 256 * 1024).unwrap_or(false) { let _ = fs::remove_file(&p); }
+        if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&p) {
+            let _ = writeln!(f, "{} {}", utc_stamp(), msg);
+        }
+    }
+}
 fn clone_dir() -> Option<PathBuf> { app_home().map(|d| d.join("game")) }
 fn clone_meta_path() -> Option<PathBuf> { app_home().map(|d| d.join("clone.state")) }
 fn clone_prefix_path() -> Option<PathBuf> { app_home().map(|d| d.join("wineprefix.path")) }
@@ -823,14 +858,26 @@ fn file_differs(local: &Path, f: &ManifestFile) -> bool {
 fn run_sync(host: &str, on_progress: impl Fn(SyncProgress)) -> SyncOut {
     use std::io::Read;
     let host = host.trim().trim_end_matches('/');
-    if host.is_empty() { return SyncOut { error: Some("no server set".into()), ..Default::default() }; }
+    log_line(&format!("sync: start host={host:?} original={:?} clone={:?} resolved={:?}",
+        resolve_original_dir(), clone_dir().filter(|c| is_game_dir(c)), resolve_game_dir()));
+    if host.is_empty() {
+        log_line("sync: FAIL no server set");
+        return SyncOut { error: Some("no server set".into()), ..Default::default() };
+    }
     let dir = match resolve_game_dir() {
         Some(d) => d,
-        None => return SyncOut { error: Some("game folder not found".into()), ..Default::default() },
+        None => {
+            log_line("sync: FAIL game folder not found (no clone and no original detected — use Locate)");
+            return SyncOut { error: Some("game folder not found".into()), ..Default::default() };
+        }
     };
     let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(60)).build();
     let (manifest, scheme) = match fetch_manifest(&agent, host) {
-        Some(x) => x, None => return SyncOut { error: Some("update server unreachable".into()), ..Default::default() },
+        Some(x) => x,
+        None => {
+            log_line(&format!("sync: FAIL update server unreachable (host={host})"));
+            return SyncOut { error: Some("update server unreachable".into()), ..Default::default() };
+        }
     };
     // Pass 1: build the work set (files that differ) so the UI gets a real total.
     let todo: Vec<&ManifestFile> = manifest.files.iter()
@@ -867,6 +914,8 @@ fn run_sync(host: &str, on_progress: impl Fn(SyncProgress)) -> SyncOut {
         out.error = Some("Couldn't write game files — close the game and make sure the \
             folder isn't read-only (avoid Program Files, or run as administrator).".into());
     }
+    log_line(&format!("sync: done dir={dir:?} checked={} todo={} updated={} failed={:?} error={:?}",
+        out.checked, total, out.updated.len(), out.failed, out.error));
     out
 }
 
@@ -891,9 +940,10 @@ async fn prepare_clone(app: tauri::AppHandle) -> CloneOut {
         let on = |done: u32, total: u32, file: &str| {
             let _ = app.emit("clone-progress", SyncProgress { done, total, file: file.to_string() });
         };
+        log_line(&format!("prepare_clone: start original={:?}", resolve_original_dir()));
         match ensure_clone(&on) {
-            Ok(dir) => CloneOut { ok: true, dir: Some(dir.to_string_lossy().into_owned()), error: None },
-            Err(e) => CloneOut { ok: false, dir: None, error: Some(e) },
+            Ok(dir) => { log_line(&format!("prepare_clone: ok dir={dir:?}")); CloneOut { ok: true, dir: Some(dir.to_string_lossy().into_owned()), error: None } }
+            Err(e) => { log_line(&format!("prepare_clone: FAILED: {e}")); CloneOut { ok: false, dir: None, error: Some(e) } }
         }
     }).await.unwrap_or_default()
 }
@@ -1360,12 +1410,21 @@ async fn play(settings: Settings, windowed: bool, username: Option<String>, tick
     // scale the fixed 800x600 2D UI up to the real resolution. AvatarMP.exe ignores
     // Config.ini (hardcoded 800x600 top-left), so only use it as a last-resort fallback.
     let windowed_exe = dir.join("AvatarMP_Windowed.exe");
-    let target = if windowed_exe.is_file() { windowed_exe } else { dir.join("AvatarMP.exe") };
+    let windowed_present = windowed_exe.is_file();
+    let target = if windowed_present { windowed_exe } else { dir.join("AvatarMP.exe") };
+    log_line(&format!("play: dir={dir:?} target={target:?} target_exists={} windowed_present={windowed_present} \
+        arena_link={} quickmatch={} proton={} gamescope={}",
+        target.is_file(),
+        dir.join("BuildingBlocks/arena_link.dll").is_file(),
+        dir.join("BuildingBlocks/zz_quickmatch.dll").is_file(), s.proton, s.gamescope));
     // Operator-tunable client settings from the gateway admin panel (fetched fresh each Play). Currently
     // the match-close delay (seconds); the DLL gets it via AVATAR_CLOSE_DELAY. Default 6 if unreachable.
     let close_delay_s: i64 = gw_json(&s.host, "GET", "/launcher/client-config", None, serde_json::json!({}))
         .get("close_delay_s").and_then(|v| v.as_i64()).unwrap_or(6);
-    let child = spawn_game(&dir, &target, logged_in, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen, s.proton, close_delay_s)?;
+    let child = match spawn_game(&dir, &target, logged_in, s.gamescope, &s.gamescope_args, s.width, s.height, want_fullscreen, s.proton, close_delay_s) {
+        Ok(c) => { log_line("play: spawn_game ok"); c }
+        Err(e) => { log_line(&format!("play: spawn_game FAILED: {e}")); return Err(e); }
+    };
     // Block (on this spawn_blocking thread) until the game exits, so the JS `await invoke('play')`
     // resolves only when the match is actually over — that's what keeps PLAY disabled (no second
     // instance) and re-arms it afterwards. `None` = detached (gamescope) → return right away.
@@ -1387,6 +1446,8 @@ struct MenuInit {
 }
 #[tauri::command]
 fn menu_init() -> MenuInit {
+    log_line(&format!("menu_init: original={:?} clone={:?} resolved={:?}",
+        resolve_original_dir(), clone_dir().filter(|c| is_game_dir(c)), resolve_game_dir()));
     match resolve_game_dir() {
         Some(dir) => {
             let tex = dir.join("game").join("Textures");
@@ -1832,6 +1893,7 @@ async fn ranked_leaderboard(host: String, mode: String) -> serde_json::Value {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    log_line(&format!("==== launcher start v{} os={} ====", env!("CARGO_PKG_VERSION"), std::env::consts::OS));
     // WebKitGTK on Linux renders a grey/blank window when its DMABUF renderer can't
     // negotiate a buffer with the system GPU stack (common on AMD/Mesa + Wayland).
     // Disabling that one renderer fixes it while staying on the NATIVE backend.
