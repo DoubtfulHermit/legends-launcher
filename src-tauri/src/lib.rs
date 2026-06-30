@@ -1933,6 +1933,29 @@ pub fn run() {
                 let tex = dir.join("game").join("Textures");
                 let _ = app.asset_protocol_scope().allow_directory(&tex, true);
             }
+            // Fit the window to the display. The default 1456x910 is taller/wider than the
+            // *usable* area on smaller screens — notably macOS, where the menu bar + Dock eat
+            // vertical space — which clipped the top nav AND the bottom PLAY bar off-screen.
+            // If the window exceeds the monitor's available area, shrink it to fit + recenter.
+            // Only ever shrinks, so big Windows/Linux screens are untouched.
+            if let Some(win) = app.get_webview_window("main") {
+                if let Ok(Some(mon)) = win.current_monitor() {
+                    let scale = mon.scale_factor();
+                    let mon_sz = mon.size().to_logical::<f64>(scale);
+                    // allowance for OS chrome (macOS menu bar ~25 + Dock ~70; taskbars) + margin
+                    let avail_w = (mon_sz.width - 40.0).max(800.0);
+                    let avail_h = (mon_sz.height - 120.0).max(600.0);
+                    if let Ok(cur) = win.outer_size() {
+                        let cur = cur.to_logical::<f64>(scale);
+                        let new_w = cur.width.min(avail_w);
+                        let new_h = cur.height.min(avail_h);
+                        if new_w + 1.0 < cur.width || new_h + 1.0 < cur.height {
+                            let _ = win.set_size(tauri::LogicalSize::new(new_w, new_h));
+                            let _ = win.center();
+                        }
+                    }
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, invite_send, invite_respond, invite_outgoing, invite_cancel, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start, ranked_queue, ranked_cancel, ranked_status, ranked_me, ranked_leaderboard, account_forgot, account_change_password, account_delete, session_logout_all, os_notify, save_loading_image])

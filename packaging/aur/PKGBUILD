@@ -3,7 +3,7 @@
 # inside links the SYSTEM webkit2gtk-4.1, so it always matches the user's GPU stack
 # (this is the whole reason it renders where the bundled AppImage grey-screens).
 pkgname=legends-awakened-launcher-bin
-pkgver=0.1.45
+pkgver=0.1.46
 pkgrel=1
 pkgdesc="Launcher for Legends Awakened (Avatar: The Last Airbender multiplayer)"
 arch=('x86_64')
