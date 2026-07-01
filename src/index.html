@@ -37,26 +37,35 @@
     <div class="win"><b id="min" title="Minimize">&#8211;</b><b id="max" title="Maximize">&#9723;</b><b class="x" id="close" title="Close">&#10005;</b></div>
   </header>
 
-  <!-- nav -->
+  <!-- nav — tabs flank a central element circle; a line runs under them and rises around it -->
   <nav class="nav">
-    <a href="#" class="on" id="navHome">Home</a>
-    <a href="#" id="navCharacter">Character</a>
-    <a href="#" id="navMatch">Match</a>
-    <a href="#" id="navNews">Leaderboard</a>
-    <div class="nav-right">
-      <div class="elements" title="Choose your element">
-        <svg class="el el-fire" title="Fire"><use href="#el-fire"/></svg>
-        <svg class="el el-air" title="Air"><use href="#el-air"/></svg>
-        <svg class="el el-water" title="Water"><use href="#el-water"/></svg>
-        <svg class="el el-earth" title="Earth"><use href="#el-earth"/></svg>
+    <div class="nav-tabs" id="navTabs">
+      <svg class="nav-line" id="navLine" aria-hidden="true" fill="none"><path id="navLinePath"/></svg>
+      <span class="nav-dot" id="navDot" aria-hidden="true"></span>
+      <a href="#" class="on" id="navHome">Home</a>
+      <a href="#" id="navCharacter">Character</a>
+      <div class="nav-center" id="navCenter">
+        <div class="nav-el" id="navEl" title="Quick-swap element">
+          <button class="ne-circle" id="neCircle" aria-label="Change element">
+            <svg class="el el-fire cr-emblem" id="neEmblem"><use href="#el-fire"/></svg>
+          </button>
+          <!-- picker fans the three NON-active elements below the circle; the active one stays in the circle above -->
+          <div class="char-fly" id="charFly" aria-hidden="true">
+            <button class="cf-el" data-slot="0" aria-label="Swap element"><svg class="el el-fire"><use href="#el-fire"/></svg></button>
+            <button class="cf-el" data-slot="1" aria-label="Swap element"><svg class="el el-fire"><use href="#el-fire"/></svg></button>
+            <button class="cf-el" data-slot="2" aria-label="Swap element"><svg class="el el-fire"><use href="#el-fire"/></svg></button>
+          </div>
+        </div>
+        <a href="#" id="navMatch">Match</a>
       </div>
-      <button class="social-tg" id="navSocial" title="Friends &amp; social" aria-label="Toggle friends panel">
-        <svg class="ic" viewBox="0 0 24 24" width="18" height="18"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        <i class="social-badge" id="socialBadge" hidden>0</i>
-      </button>
-      <div class="acct" id="acct">
-        <span class="av">?</span><span class="nm">Sign in</span><span class="cv">&#9662;</span>
-      </div>
+      <a href="#" id="navNews">Leaderboard</a>
+      <a href="#" id="navTourney" class="nav-locked" aria-disabled="true" title="Tournaments — coming soon">
+        Tournament
+        <svg class="nav-lock" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 10V7a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <rect x="5.5" y="10" width="13" height="9.5" rx="2.2" fill="currentColor"/>
+        </svg>
+      </a>
     </div>
   </nav>
 
@@ -84,17 +93,32 @@
     <section class="view view--character" id="view-character" hidden>
       <div class="char-view">
         <aside class="char-left">
+          <div class="char-id">
+            <span class="ci-emblem"><svg class="el cr-emblem" id="ciEmblem"><use href="#el-fire"/></svg></span>
+            <div class="ci-txt">
+              <b id="charName">Character</b>
+              <small id="charElement">Choose your bending</small>
+            </div>
+          </div>
           <div class="char-radial" id="charRadial">
-            <span class="cr-ring"></span>
+            <svg class="cr-web" viewBox="0 0 400 400" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+              <circle class="cw-orbit" cx="200" cy="200" r="150"/>
+              <g class="cw-spokes">
+                <line x1="200" y1="200" x2="200" y2="58"/><line x1="200" y1="200" x2="342" y2="200"/>
+                <line x1="200" y1="200" x2="200" y2="342"/><line x1="200" y1="200" x2="58" y2="200"/>
+              </g>
+              <g class="cw-gems">
+                <rect x="193.5" y="98.5" width="13" height="13" rx="2" transform="rotate(45 200 105)"/>
+                <rect x="288.5" y="193.5" width="13" height="13" rx="2" transform="rotate(45 295 200)"/>
+                <rect x="193.5" y="288.5" width="13" height="13" rx="2" transform="rotate(45 200 295)"/>
+                <rect x="98.5" y="193.5" width="13" height="13" rx="2" transform="rotate(45 105 200)"/>
+              </g>
+            </svg>
             <button class="cr-node" data-el="fire"  title="Fire"><svg class="el el-fire"><use href="#el-fire"/></svg></button>
             <button class="cr-node" data-el="air"   title="Air"><svg class="el el-air"><use href="#el-air"/></svg></button>
             <button class="cr-node" data-el="water" title="Water"><svg class="el el-water"><use href="#el-water"/></svg></button>
             <button class="cr-node" data-el="earth" title="Earth"><svg class="el el-earth"><use href="#el-earth"/></svg></button>
             <div class="cr-hub"><svg class="el cr-emblem" id="crEmblem"><use href="#el-fire"/></svg></div>
-          </div>
-          <div class="char-id">
-            <b id="charName">Character</b>
-            <small id="charElement">Choose your bending</small>
           </div>
           <div class="char-roster">
             <span class="cr-label">Characters</span>
@@ -329,9 +353,13 @@
 
   <!-- bottom action bar -->
   <div class="bar">
-    <div class="status">
-      <div class="online"><span class="dot"></span><b id="players">&mdash;</b><small>PLAYERS ONLINE</small></div>
-      <div class="ver" id="version">Legends Awakened</div>
+    <div class="online"><span class="dot"></span><b id="players">&mdash;</b><small>PLAYERS ONLINE</small></div>
+    <div class="ver" id="version">Legends Awakened</div>
+    <div class="userbar" id="userbar" title="Friends &amp; social">
+      <i class="ub-badge" id="socialBadge" hidden>0</i>
+      <div class="ub-id ub-id--r"><b id="ubName">Sign in</b><small id="ubState">Offline</small></div>
+      <span class="ub-av" id="ubAv" style="--ah:30">?</span>
+      <span class="ub-dot" id="ubDot"></span>
     </div>
     <div class="play-wrap">
       <button class="play" id="play">

@@ -135,21 +135,28 @@ resizeCanvas(); window.addEventListener('resize', resizeCanvas);
 
 // ── theme (element) ──────────────────────────────────────────────────────────
 const emblemUse = document.querySelector('.emblem use');
-function setElement(el){
+function setElement(el, animate){
+  const changed = (el !== SAVE.element);
   app.setAttribute('data-el', el);
   emblemUse.setAttribute('href', '#el-'+el);
   document.querySelector('#login .mark use')?.setAttribute('href','#el-'+el);
   document.querySelectorAll('.theme-el use').forEach(u=>u.setAttribute('href','#el-'+el));   // Play/Training element motifs
-  document.querySelectorAll('.elements .el').forEach(s=>
-    s.classList.toggle('on', /el-(\w+)/.exec(s.getAttribute('class'))[1]===el));
+  const ne=$('neEmblem'); if(ne){ ne.setAttribute('class','el el-'+el+' cr-emblem'); ne.querySelector('use').setAttribute('href','#el-'+el); }
+  if(animate && changed) spinElementCircle();   // wheel spins right + snaps onto the new element
   currentElement=el; initParticles();
   SAVE.element=el; persist();
   if(typeof renderCharacter==='function' && typeof curView!=='undefined' && curView==='character') renderCharacter();
 }
-document.querySelectorAll('.elements .el').forEach(s=>{
-  const el=/el-(\w+)/.exec(s.getAttribute('class'))[1];
-  s.addEventListener('click', ()=>setElement(el));
-});
+// the nav element-circle does a satisfying spin-and-snap when you swap bender
+function spinElementCircle(){
+  const nec=$('neCircle'); if(!nec) return;
+  nec.classList.remove('swap'); void nec.offsetWidth;   // restart the keyframes
+  nec.classList.add('swap');
+  nec.addEventListener('animationend', ()=>nec.classList.remove('swap'), {once:true});
+}
+// clicking the central circle also pops the quick-swap picker (in addition to hover)
+{ const _ne=$('neCircle'); if(_ne) _ne.addEventListener('click', e=>{ e.stopPropagation();
+    const host=$('navEl'); if(host){ clearTimeout(_flyTimer); if(typeof syncFly==='function') syncFly(); host.classList.toggle('fly-open'); } }); }
 
 // ── toast ────────────────────────────────────────────────────────────────────
 let toastTimer;
@@ -158,23 +165,31 @@ function toast(msg, kind){
   clearTimeout(toastTimer); toastTimer=setTimeout(()=>{ t.className='toast'; }, 4200);
 }
 
-// ── account chip + dropdown ──────────────────────────────────────────────────
-const acct=$('acct'), acctMenu=$('acctMenu');
+// ── bottom-right profile bar + account dropdown ──────────────────────────────
+const userbar=$('userbar'), acctMenu=$('acctMenu');
 function showChip(name){
-  document.querySelector('.acct .nm').textContent = name || 'Sign in';
-  document.querySelector('.acct .av').textContent = (name ? name[0] : '?').toUpperCase();
+  const nm=$('ubName'); if(nm) nm.textContent = name || 'Sign in';
+  const av=$('ubAv');   if(av){ av.textContent = name ? initials(name) : '?'; av.style.setProperty('--ah', nameHue(name||'?')); }
+  const st=$('ubState');if(st) st.textContent = name ? 'Online' : 'Offline';
+  if(userbar) userbar.classList.toggle('online', !!name);
   if(typeof renderMe==='function') renderMe();
   if(typeof syncCharTab==='function') syncCharTab();   // nav tab shows your character name
   if(typeof renderCharacter==='function' && typeof curView!=='undefined' && curView==='character') renderCharacter();
 }
-acct.addEventListener('click', e=>{
-  e.stopPropagation();
+function openAcctMenu(){
   const s=SAVE.session, name=(s&&s.name)||'';
   $('amName').textContent = name || 'Guest';
   $('amServer').textContent = s ? 'Online' : 'Signed out';
   const av=$('amAv'); if(av){ av.textContent = s ? initials(name) : '?'; av.style.setProperty('--ah', nameHue(s?name:'?')); }
   acctMenu.classList.toggle('signedout', !s);
   acctMenu.classList.toggle('open');
+}
+// the profile bar simply brings up the social panel
+if(userbar) userbar.addEventListener('click', e=>{ e.stopPropagation(); toggleSocial(); });
+// account actions live inside the social screen: click your own profile row (top of the panel) → account menu
+const _frMeAcct=$('frMe'); if(_frMeAcct) _frMeAcct.addEventListener('click', e=>{
+  const col=$('frCollapse'); if(col && col.contains(e.target)) return;   // the collapse chevron still just hides the panel
+  e.stopPropagation(); openAcctMenu();
 });
 document.addEventListener('click', ()=>acctMenu.classList.remove('open'));
 acctMenu.addEventListener('click', e=>e.stopPropagation());
@@ -193,7 +208,7 @@ function setSocialOpen(open){
 function toggleSocial(){ setSocialOpen(!isSocialOpen()); }
 if(navSocial) navSocial.addEventListener('click', e=>{ e.stopPropagation(); toggleSocial(); });
 const _frCollapse=$('frCollapse'); if(_frCollapse) _frCollapse.addEventListener('click', ()=>setSocialOpen(false));
-if(SAVE.settings.socialOpen===false) app.classList.add('social-closed');   // apply persisted state (default open)
+if(SAVE.settings.socialOpen!==true) app.classList.add('social-closed');   // default closed; the bottom-left profile brings it up
 
 // own-profile header at the top of the panel (avatar · name · online/offline)
 function renderMe(){
@@ -725,7 +740,7 @@ let curView = 'home';
 function setView(v){
   curView = v;
   for(const id of ['home','character','match','ranks','settings']) $('view-'+id).hidden = (id !== v);
-  document.querySelectorAll('.nav > a').forEach(a=>a.classList.remove('on'));
+  document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('on'));   // .nav a (char link is wrapped in .char-nav)
   if(NAV[v]) $(NAV[v]).classList.add('on');
   $('navSettings').classList.toggle('on', v==='settings');           // the top-right gear pill
   if(v==='ranks') renderBoard();
@@ -735,11 +750,13 @@ function setView(v){
   if(v==='home' && typeof loadFriends==='function') loadFriends();
   if(typeof setStatus==='function' && !_inGame) setStatus(v==='settings' ? 'in settings' : 'in lobby');
   updateCTA();
+  if(typeof positionNavDot==='function') positionNavDot(true);   // ride the active-tab marker along the line
 }
 $('navHome').addEventListener('click', e=>{ e.preventDefault(); setView('home'); });
 $('navCharacter').addEventListener('click', e=>{ e.preventDefault(); setView('character'); });
 $('navMatch').addEventListener('click', e=>{ e.preventDefault(); setView('match'); });
 $('navNews').addEventListener('click', e=>{ e.preventDefault(); setView('ranks'); });
+{ const _t=$('navTourney'); if(_t) _t.addEventListener('click', e=>{ e.preventDefault(); toast('Tournaments are coming soon','info'); }); }
 
 // ── Character tab: radial element selector + bending loadout + assignable attributes ──────
 // Scaffolding for the in-game character (loadout/attrs are local previews for now). The radial
@@ -754,7 +771,7 @@ const BEND_SKILLS = {
 const CHAR_ATTRS = [['power','Power'],['speed','Speed'],['defense','Defense'],['chi','Chi'],['vitality','Vitality']];
 const ATTR_BASE = 3, ATTR_MAX = 10, ATTR_POOL = 5;
 const charName = () => (SAVE.session && SAVE.session.name) || 'Character';
-function syncCharTab(){ const a=$('navCharacter'); if(a) a.textContent = charName(); }
+function syncCharTab(){ const a=$('navCharacter'); if(a) a.textContent = 'Character'; }  /* tab stays "Character"; the real name lives in the hover flyout */
 function renderRoster(){
   const nm=charName(), host=$('charRoster'); if(!host) return;
   host.innerHTML =
@@ -785,17 +802,107 @@ function renderAttrs(){
 function renderCharacter(){
   $('charName').textContent = charName();
   $('charElement').textContent = NATIONS[SAVE.element] || 'Choose your bending';
-  const em=$('crEmblem'); if(em){ em.setAttribute('class','el el-'+SAVE.element+' cr-emblem'); em.querySelector('use').setAttribute('href','#el-'+SAVE.element); }
+  ['crEmblem','ciEmblem'].forEach(id=>{ const em=$(id); if(em){ em.setAttribute('class','el el-'+SAVE.element+' cr-emblem'); em.querySelector('use').setAttribute('href','#el-'+SAVE.element); } });
   document.querySelectorAll('#charRadial .cr-node').forEach(n=>n.classList.toggle('on', n.dataset.el===SAVE.element));
   renderRoster(); renderLoadout(); renderAttrs();
 }
-$('charRadial').addEventListener('click', e=>{ const n=e.target.closest('.cr-node'); if(n){ setElement(n.dataset.el); renderCharacter(); } });
+$('charRadial').addEventListener('click', e=>{ const n=e.target.closest('.cr-node'); if(n){ setElement(n.dataset.el, true); renderCharacter(); } });
 $('attrs').addEventListener('click', e=>{ const b=e.target.closest('.attr-btn'); if(!b||b.disabled) return;
   const k=b.closest('.attr').dataset.k, a=SAVE.char.attrs;
   if(b.classList.contains('inc')) a[k]=(a[k]||0)+1; else a[k]=Math.max(0,(a[k]||0)-1);
   persist(); renderAttrs(); });
 $('loadout').addEventListener('click', e=>{ if(e.target.closest('.skill')) toast('Loadout editing is coming soon.','ok'); });
 $('charRoster').addEventListener('click', e=>{ if(e.target.closest('.char-slot.add')) toast('Multiple custom characters are coming soon.','ok'); });
+
+// hover the central element circle → the quick-swap "+" picker blooms open (hover-intent, so a
+// brief gap between circle and menu doesn't snap it shut). Clicking an element swaps your bender.
+const navEl=$('navEl'), charFly=$('charFly'); let _flyTimer;
+const ELEMENTS = ['fire','water','earth','air'];
+function syncFly(){
+  // the picker shows only the three NON-active elements; the active one lives in the circle above
+  const others = ELEMENTS.filter(e=>e!==SAVE.element);
+  document.querySelectorAll('#charFly .cf-el').forEach((b,i)=>{
+    const el = others[i]; if(!el) return;
+    b.dataset.el = el;
+    b.title = el[0].toUpperCase()+el.slice(1);
+    const svg=b.querySelector('svg'); svg.setAttribute('class','el el-'+el);
+    svg.querySelector('use').setAttribute('href','#el-'+el);
+  });
+}
+if(navEl){
+  navEl.addEventListener('mouseenter', ()=>{ clearTimeout(_flyTimer); syncFly(); navEl.classList.add('fly-open'); });
+  navEl.addEventListener('mouseleave', ()=>{ _flyTimer=setTimeout(()=>navEl.classList.remove('fly-open'), 160); });
+}
+if(charFly) charFly.addEventListener('click', e=>{ const b=e.target.closest('.cf-el'); if(!b) return; e.stopPropagation();
+  const el=b.dataset.el; if(el!==SAVE.element){ setElement(el, true); toast('Now bending '+el[0].toUpperCase()+el.slice(1),'ok'); }
+  syncFly();
+  if(typeof renderCharacter==='function' && curView==='character') renderCharacter();
+  clearTimeout(_flyTimer); navEl.classList.remove('fly-open');
+});
+
+// draw the running underline: flat under the tabs, rising into a hump around the element circle
+function layoutNavLine(){
+  const tabs=$('navTabs'), el=$('navEl'), line=$('navLine'), path=$('navLinePath'), match=$('navMatch');
+  if(!tabs||!el||!line||!path) return;
+  const tr=tabs.getBoundingClientRect(), er=el.getBoundingClientRect();
+  const W=Math.max(1,Math.round(tr.width)), H=44;
+  const cx=Math.round(er.left+er.width/2-tr.left);   // element-circle centre, relative to the tab row
+  const base=H-2, crown=-13;                         // baseline + how high the canopy arcs OVER the group
+  // the line arcs up and OVER both the circle and Match, so they nestle inside the groove beneath it
+  const er2=el.getBoundingClientRect();
+  const gL = Math.round(er2.left-tr.left);            // circle's left edge (left edge of the group)
+  let gR = cx+34;                                     // Match's right edge (right edge of the group)
+  if(match){ const m=match.getBoundingClientRect(); gR=Math.round(m.right-tr.left); }
+  const gc = (gL+gR)/2;                               // centre of the circle+Match pair
+  const hw = (gR-gL)/2 + 4;                           // half-width of the flat crown (snug to the pair)
+  const rw = 30;                                      // ramp width — equal on both sides so the notch is symmetric
+  const cL = Math.round(gc-hw), cR = Math.round(gc+hw);   // flat crown span
+  const bL = cL-rw, bR = cR+rw;                       // where the ramps meet the baseline
+  line.setAttribute('viewBox',`0 0 ${W} ${H}`); line.setAttribute('width',W); line.setAttribute('height',H);
+  path.setAttribute('d',
+    `M0 ${base} H ${bL} `+                                            // baseline under Home / Character
+    `C ${bL+Math.round(rw*0.55)} ${base} ${cL-Math.round(rw*0.55)} ${crown} ${cL} ${crown} `+  // ramp up
+    `H ${cR} `+                                                       // canopy held symmetrically over the pair
+    `C ${cR+Math.round(rw*0.55)} ${crown} ${bR-Math.round(rw*0.55)} ${base} ${bR} ${base} `+   // ramp down
+    `H ${W}`);                                                        // baseline run-in to Leaderboard
+  positionNavDot();
+}
+// the glowing marker RIDES ALONG the nav line (x + y) to sit under the active tab —
+// so on the Match tab it travels up the ramp and onto the canopy, tracing the curve.
+let _dotRAF=null, _dotDist=null;
+function _pathLenAtX(path, x){                 // x is monotonic along the path → binary-search its length
+  const L=path.getTotalLength(); let lo=0, hi=L;
+  for(let i=0;i<26;i++){ const mid=(lo+hi)/2; (path.getPointAtLength(mid).x < x) ? (lo=mid) : (hi=mid); }
+  return (lo+hi)/2;
+}
+function _placeDotAt(dist){
+  const tabs=$('navTabs'), dot=$('navDot'), path=$('navLinePath'), svg=$('navLine');
+  if(!tabs||!dot||!path||!svg) return;
+  const p=path.getPointAtLength(dist), tr=tabs.getBoundingClientRect(), sr=svg.getBoundingClientRect();
+  dot.style.left=(sr.left + p.x - tr.left)+'px';    // svg-local (viewBox) coords map 1:1 to CSS px
+  dot.style.top =(sr.top  + p.y - tr.top )+'px';
+}
+function positionNavDot(animate){
+  const tabs=$('navTabs'), dot=$('navDot'), path=$('navLinePath'), svg=$('navLine');
+  if(!tabs||!dot||!path||!svg) return;
+  const on=tabs.querySelector('.nav a.on') || document.querySelector('.nav a.on');
+  if(!on){ dot.classList.remove('show'); return; }
+  const ar=on.getBoundingClientRect(), sr=svg.getBoundingClientRect();
+  const target=_pathLenAtX(path, ar.left + ar.width/2 - sr.left);
+  dot.classList.add('show');
+  if(_dotRAF){ cancelAnimationFrame(_dotRAF); _dotRAF=null; }
+  if(!animate || _dotDist===null){ _dotDist=target; _placeDotAt(target); return; }   // snap on first paint / resize
+  const from=_dotDist, to=target, dur=380, t0=performance.now(), ease=x=>1-Math.pow(1-x,3);
+  (function step(now){
+    const k=Math.min(1,(now-t0)/dur), d=from+(to-from)*ease(k);
+    _dotDist=d; _placeDotAt(d);
+    _dotRAF = k<1 ? requestAnimationFrame(step) : null;
+  })(performance.now());
+}
+window.addEventListener('resize', layoutNavLine);
+window.addEventListener('load', ()=>setTimeout(layoutNavLine,60));
+try{ document.fonts.ready.then(()=>setTimeout(layoutNavLine,20)); }catch(e){}
+setTimeout(layoutNavLine, 400);
 
 // The bottom-right button is one contextual CTA:
 //   Home / Ranks  → "MATCH"   (jump to the Match tab)
@@ -1790,7 +1897,7 @@ if(!HAS_TAURI && /[?&]demo/.test(location.search)){
       else if(state==='custom'){ setView('match'); setPlayMode('custom'); }
       else if(state==='help') $('cbHow').click();
       else if(state==='account') openDrawer();
-      else if(state==='acctmenu') acct.click();
+      else if(state==='acctmenu'){ setSocialOpen(true); openAcctMenu(); }
     });
   }
 }
