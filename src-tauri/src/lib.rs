@@ -187,12 +187,24 @@ fn source_fingerprint(dir: &Path) -> String {
     }).unwrap_or((0, 0));
     format!("{}|{}|{}", dir.display(), size, mtime)
 }
+// A Windows DRIVE ROOT (e.g. E:\) holds system folders that deny access even to admins. If the
+// game was extracted straight to a drive root, the recursive clone would descend into these and
+// abort the whole first-time setup with "Access is denied (os error 5)". They are never game
+// files, so skip them by name (case-insensitively).
+fn is_protected_dir(name: &str) -> bool {
+    name.eq_ignore_ascii_case("System Volume Information")
+        || name.eq_ignore_ascii_case("$RECYCLE.BIN")
+        || name.eq_ignore_ascii_case("found.000")     // chkdsk salvage artifacts
+}
 fn count_files(dir: &Path) -> u32 {
     let mut n = 0;
     if let Ok(rd) = fs::read_dir(dir) {
         for e in rd.flatten() {
             match e.file_type() {
-                Ok(ft) if ft.is_dir() => n += count_files(&e.path()),
+                Ok(ft) if ft.is_dir() => {
+                    if is_protected_dir(&e.file_name().to_string_lossy()) { continue; }
+                    n += count_files(&e.path());
+                }
                 Ok(ft) if ft.is_file() => n += 1,
                 _ => {}
             }
@@ -201,19 +213,31 @@ fn count_files(dir: &Path) -> u32 {
     n
 }
 // Recursively copy src→dst, overwriting (so a re-clone refreshes), reporting per file.
-fn copy_tree(src: &Path, dst: &Path, total: u32, done: &mut u32,
+// Resilient by design: skips protected drive-root system folders, and TOLERATES a per-entry
+// access error (unreadable/locked/AV-held source file, or an unreadable source subdir) by skipping
+// it and carrying on — so one bad entry can't abort the entire clone. `skipped` counts what was
+// passed over. A failure to create the DESTINATION dir is still fatal (propagated) — that's a real
+// "can't write the clone" problem, not a source quirk.
+fn copy_tree(src: &Path, dst: &Path, total: u32, done: &mut u32, skipped: &mut u32,
              on: &dyn Fn(u32, u32, &str)) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let ft = entry.file_type()?;
-        let (from, to) = (entry.path(), dst.join(entry.file_name()));
+    let rd = match fs::read_dir(src) {
+        Ok(rd) => rd,
+        Err(_) => { *skipped += 1; return Ok(()); }   // unreadable source dir → skip, keep going
+    };
+    for entry in rd {
+        let entry = match entry { Ok(e) => e, Err(_) => { *skipped += 1; continue; } };
+        let name = entry.file_name();
+        let ft = match entry.file_type() { Ok(ft) => ft, Err(_) => { *skipped += 1; continue; } };
+        let (from, to) = (entry.path(), dst.join(&name));
         if ft.is_dir() {
-            copy_tree(&from, &to, total, done, on)?;
+            if is_protected_dir(&name.to_string_lossy()) { continue; }
+            copy_tree(&from, &to, total, done, skipped, on)?;
         } else if ft.is_file() {
-            fs::copy(&from, &to)?;
-            *done += 1;
-            on(*done, total, &entry.file_name().to_string_lossy());
+            match fs::copy(&from, &to) {
+                Ok(_) => { *done += 1; on(*done, total, &name.to_string_lossy()); }
+                Err(_) => { *skipped += 1; }          // locked/AV-held/unreadable single file → skip
+            }
         }
     }
     Ok(())
@@ -240,8 +264,18 @@ fn ensure_clone(on: &dyn Fn(u32, u32, &str)) -> Result<PathBuf, String> {
     if let Some(parent) = dst.parent() { let _ = fs::create_dir_all(parent); }
     let total = count_files(&src);
     let mut done = 0u32;
+    let mut skipped = 0u32;
     on(0, total, "");
-    copy_tree(&src, &dst, total, &mut done, on).map_err(|e| format!("clone copy: {e}"))?;
+    copy_tree(&src, &dst, total, &mut done, &mut skipped, on).map_err(|e| format!("clone copy: {e}"))?;
+    // The copy tolerates skipped entries; make sure the essential game files actually landed.
+    // (If the game sat at a drive root, only the protected system folders were skipped and the
+    // clone is complete; if the DESTINATION was blocked, nothing copied and this catches it.)
+    if !is_game_dir(&dst) {
+        return Err(format!(
+            "clone incomplete — the game's main program couldn't be copied ({skipped} item(s) \
+             skipped). If your game is installed at a drive root (e.g. E:\\), move it into a \
+             subfolder such as E:\\Avatar and click Retry."));
+    }
     let _ = fs::write(&meta, &fp);
     // Linux: record which wine prefix the ORIGINAL lived in, so we run the clone there
     // (that prefix already has the game's deps). Harmless on Windows (no drive_c → None).
@@ -1678,6 +1712,29 @@ async fn character_delete(host: String, token: String, nation: i64) -> serde_jso
                 serde_json::json!({"nation": nation}))
     ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
 }
+// Static 8-family bending catalog (no auth) — the loadout picker labels its slots from this.
+#[tauri::command]
+async fn bending_families(host: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "GET", "/launcher/bending-families", None, serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+// Write a character's 4-family loadout ("a,b,c,d" of families 1..8, distinct).
+#[tauri::command]
+async fn characters_skills(host: String, token: String, nation: i64, bending_ids: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/launcher/characters/skills", Some(&token),
+                serde_json::json!({"nation": nation, "bending_ids": bending_ids}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+// Spend/adjust attribute points (only the stats sent change); returns the new points budget.
+#[tauri::command]
+async fn characters_attributes(host: String, token: String, nation: i64, attributes: serde_json::Value) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/launcher/characters/attributes", Some(&token),
+                serde_json::json!({"nation": nation, "attributes": attributes}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
 
 // ── account self-service: forgot / change password / sign-out-all / delete ────
 #[tauri::command]
@@ -2001,7 +2058,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, characters_list, character_create, character_rename, character_select, character_delete, invite_send, invite_respond, invite_outgoing, invite_cancel, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start, ranked_queue, ranked_cancel, ranked_status, ranked_me, ranked_leaderboard, account_forgot, account_change_password, account_delete, session_logout_all, os_notify, save_loading_image])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, characters_list, character_create, character_rename, character_select, character_delete, bending_families, characters_skills, characters_attributes, invite_send, invite_respond, invite_outgoing, invite_cancel, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start, ranked_queue, ranked_cancel, ranked_status, ranked_me, ranked_leaderboard, account_forgot, account_change_password, account_delete, session_logout_all, os_notify, save_loading_image])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
