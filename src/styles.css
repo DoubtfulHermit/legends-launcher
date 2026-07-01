@@ -295,7 +295,12 @@ body{background:var(--bg);font:14px/1.5 Inter,system-ui,Segoe UI,sans-serif;colo
 .pill i{width:6px;height:6px;border-radius:50%;background:var(--good);box-shadow:0 0 8px var(--good)}
 .pill.off i{background:#f85149;box-shadow:0 0 8px #f85149}
 
-.play-wrap{display:none;margin-left:auto;flex-direction:column;align-items:flex-end;gap:7px}   /* PLAY hidden for now */
+/* PLAY floats bottom-right, shown ONLY on the Match tab (.app.show-play); shifts left to
+   clear the social rail when it's open. The thin bar's right side is empty, so it sits there. */
+.play-wrap{position:absolute;right:24px;bottom:52px;z-index:22;display:none;flex-direction:column;align-items:flex-end;gap:7px;
+  transition:right .28s cubic-bezier(.4,0,.2,1)}
+.app.show-play .play-wrap{display:flex}
+.app:not(.social-closed).show-play .play-wrap{right:360px}
 .play{position:relative;display:flex;align-items:center;gap:12px;border:0;cursor:pointer;
   padding:0 46px;height:62px;border-radius:12px;font-family:Cinzel,serif;font-weight:900;letter-spacing:.18em;
   font-size:20px;color:#fff;text-shadow:0 1px 8px rgba(0,0,0,.4);

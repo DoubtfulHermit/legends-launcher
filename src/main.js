@@ -807,12 +807,10 @@ function ctaMode(){
   return 'hidden';                           // ranks: viewing only — no action button
 }
 function updateCTA(){
-  const m=ctaMode(), pw=$('play');
-  if(m==='hidden'){ pw.style.display='none'; return; }
-  if(pw.style.display==='none') pw.style.display='flex';
-  if(pw.disabled) return;                    // mid-launch: leave the label alone
-  if(m==='ranked') setPlayLabel(_rankedSearching ? 'SEARCHING…' : 'PLAY RANKED');
-  else setPlayLabel(m==='play' ? 'PLAY' : 'MATCH');
+  app.classList.toggle('show-play', curView==='match');    // PLAY button shows ONLY on the Match tab
+  if(curView!=='match') return;
+  if($('play').disabled) return;             // mid-launch: leave the label alone
+  setPlayLabel(_playMode==='ranked' ? (_rankedSearching ? 'SEARCHING…' : 'PLAY RANKED') : 'PLAY');
 }
 function onCTA(){
   const m=ctaMode();
