@@ -234,7 +234,7 @@ fn copy_tree(src: &Path, dst: &Path, total: u32, done: &mut u32, skipped: &mut u
             if is_protected_dir(&name.to_string_lossy()) { continue; }
             copy_tree(&from, &to, total, done, skipped, on)?;
         } else if ft.is_file() {
-            match fs::copy(&from, &to) {
+            match copy_file_force(&from, &to) {
                 Ok(_) => { *done += 1; on(*done, total, &name.to_string_lossy()); }
                 Err(_) => { *skipped += 1; }          // locked/AV-held/unreadable single file → skip
             }
@@ -242,10 +242,42 @@ fn copy_tree(src: &Path, dst: &Path, total: u32, done: &mut u32, skipped: &mut u
     }
     Ok(())
 }
+// fs::copy, but able to overwrite a READ-ONLY destination. fs::copy copies permission bits, so a
+// game sourced from a zip/CD rip lands read-only in the clone — a later re-clone overwrite would
+// then fail on every file (access denied). Clear the readonly bit and retry once.
+fn copy_file_force(from: &Path, to: &Path) -> std::io::Result<u64> {
+    match fs::copy(from, to) {
+        Ok(n) => Ok(n),
+        Err(e) => {
+            if let Ok(meta) = fs::metadata(to) {
+                if meta.permissions().readonly() {
+                    let mut p = meta.permissions();
+                    #[cfg(unix)]
+                    { use std::os::unix::fs::PermissionsExt; p.set_mode(p.mode() | 0o200); }
+                    #[cfg(not(unix))]
+                    p.set_readonly(false);
+                    if fs::set_permissions(to, p).is_ok() {
+                        return fs::copy(from, to);
+                    }
+                }
+            }
+            Err(e)
+        }
+    }
+}
 // Ensure a fresh clone of the original exists in the home. No-op when the clone is
 // present and its source fingerprint is unchanged. Returns the clone dir.
 fn ensure_clone(on: &dyn Fn(u32, u32, &str)) -> Result<PathBuf, String> {
     let src = resolve_original_dir().ok_or("game folder not found")?;
+    // NEVER clone a whole drive. If the game was extracted straight to a drive root (E:\), the
+    // recursive copy would sweep up everything else on that drive (and its protected system
+    // folders used to abort the copy with "Access is denied"). Refuse with instructions instead.
+    if src.parent().is_none() {
+        return Err(format!(
+            "your game files sit at the top of a drive ({d}) — the launcher won't copy a whole \
+             drive. Move the game into its own folder (e.g. {d}Avatar), then restart the \
+             launcher and click LOCATE GAME to pick that folder.", d = src.display()));
+    }
     let dst = clone_dir().ok_or("no home dir")?;
     let meta = clone_meta_path().ok_or("no home dir")?;
     let fp = source_fingerprint(&src);
@@ -267,6 +299,7 @@ fn ensure_clone(on: &dyn Fn(u32, u32, &str)) -> Result<PathBuf, String> {
     let mut skipped = 0u32;
     on(0, total, "");
     copy_tree(&src, &dst, total, &mut done, &mut skipped, on).map_err(|e| format!("clone copy: {e}"))?;
+    log_line(&format!("clone: copied {done}/{total}, skipped {skipped}, src={src:?}"));
     // The copy tolerates skipped entries; make sure the essential game files actually landed.
     // (If the game sat at a drive root, only the protected system folders were skipped and the
     // clone is complete; if the DESTINATION was blocked, nothing copied and this catches it.)
@@ -276,7 +309,16 @@ fn ensure_clone(on: &dyn Fn(u32, u32, &str)) -> Result<PathBuf, String> {
              skipped). If your game is installed at a drive root (e.g. E:\\), move it into a \
              subfolder such as E:\\Avatar and click Retry."));
     }
-    let _ = fs::write(&meta, &fp);
+    // Only mark the clone "current" when NOTHING real was skipped (name-skipped protected system
+    // folders don't count). If a game file was locked (AV scan in progress etc.), leaving the meta
+    // unwritten makes the next launch re-run this overwrite-copy and fill the gap once the lock
+    // clears — the player can still play NOW (the essential files landed), and the clone
+    // self-heals instead of being silently incomplete forever.
+    if skipped == 0 {
+        let _ = fs::write(&meta, &fp);
+    } else {
+        let _ = fs::remove_file(&meta);
+    }
     // Linux: record which wine prefix the ORIGINAL lived in, so we run the clone there
     // (that prefix already has the game's deps). Harmless on Windows (no drive_c → None).
     if let (Some(pp), Some(wp)) = (clone_prefix_path(), wine_prefix_of(&src)) {
@@ -731,7 +773,16 @@ fn load(app: tauri::AppHandle) -> LoadResult {
     let cloned = clone_dir().map(|c| is_game_dir(&c)).unwrap_or(false);
     let original = resolve_original_dir();
     let original_dir = original.as_ref().map(|p| p.to_string_lossy().into_owned());
-    let needs_clone = original.is_some() && !cloned;
+    // A clone is STALE when its recorded source fingerprint is absent (the last copy skipped a
+    // locked file — ensure_clone leaves the meta unwritten so we retry) or no longer matches the
+    // original (the source install changed). Re-showing the wizard runs the overwrite-copy with
+    // visible progress, healing the clone. Matching fingerprint → no wizard, exactly as before.
+    let stale = cloned && original.as_ref().map(|o| {
+        clone_meta_path().and_then(|m| fs::read_to_string(m).ok())
+            .map(|prev| prev.trim() != source_fingerprint(o))
+            .unwrap_or(true)
+    }).unwrap_or(false);
+    let needs_clone = original.is_some() && (!cloned || stale);
     match resolve_game_dir() {
         Some(dir) => {
             let mut settings = read_settings(&dir);
@@ -2061,4 +2112,112 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, characters_list, character_create, character_rename, character_select, character_delete, bending_families, characters_skills, characters_attributes, invite_send, invite_respond, invite_outgoing, invite_cancel, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start, ranked_queue, ranked_cancel, ranked_status, ranked_me, ranked_leaderboard, account_forgot, account_change_password, account_delete, session_logout_all, os_notify, save_loading_image])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// ── tests: first-time-setup clone resilience ─────────────────────────────────
+// These simulate the real failure modes seen in the field: a game extracted to a
+// drive root (protected system folders), AV-locked/unreadable files, and read-only
+// files (zip/CD-rip installs) blocking a re-clone overwrite.
+#[cfg(test)]
+mod clone_tests {
+    use super::*;
+    use std::fs;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir()
+            .join(format!("la_clone_test_{}_{}", name, std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+    fn write(p: &Path, body: &str) {
+        if let Some(par) = p.parent() { fs::create_dir_all(par).unwrap(); }
+        fs::write(p, body).unwrap();
+    }
+    #[cfg(unix)]
+    fn chmod(p: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(p, fs::Permissions::from_mode(mode)).unwrap();
+    }
+    fn run_copy(src: &Path, dst: &Path) -> (u32, u32, u32) {
+        let total = count_files(src);
+        let (mut done, mut skipped) = (0u32, 0u32);
+        copy_tree(src, dst, total, &mut done, &mut skipped, &|_, _, _| {}).unwrap();
+        (total, done, skipped)
+    }
+
+    #[test]
+    fn protected_drive_root_dirs_are_skipped() {
+        let src = tmp("prot_src");
+        let dst = tmp("prot_dst");
+        write(&src.join("AvatarMP.exe"), "exe");
+        write(&src.join("BuildingBlocks/Avatar.dll"), "dll");
+        write(&src.join("System Volume Information/tracking.log"), "deny");
+        write(&src.join("$RECYCLE.BIN/S-1-5/junk"), "deny");
+        write(&src.join("system volume information/x"), "case-insensitive too");
+        let (total, done, skipped) = run_copy(&src, &dst);
+        assert_eq!((total, done, skipped), (2, 2, 0), "only real files counted+copied");
+        assert!(dst.join("AvatarMP.exe").is_file());
+        assert!(dst.join("BuildingBlocks/Avatar.dll").is_file());
+        assert!(!dst.join("System Volume Information").exists(), "protected dir not cloned");
+        assert!(!dst.join("$RECYCLE.BIN").exists());
+        assert!(is_game_dir(&dst), "essential check passes");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_entries_are_tolerated_not_fatal() {
+        let src = tmp("lock_src");
+        let dst = tmp("lock_dst");
+        write(&src.join("AvatarMP.exe"), "exe");
+        write(&src.join("ok.txt"), "fine");
+        write(&src.join("locked.bin"), "av-held");
+        chmod(&src.join("locked.bin"), 0o000);
+        fs::create_dir_all(src.join("lockeddir")).unwrap();
+        chmod(&src.join("lockeddir"), 0o000);
+        if fs::read(src.join("locked.bin")).is_ok() {
+            // running as root — access denial can't be simulated; restore + skip
+            chmod(&src.join("lockeddir"), 0o755);
+            eprintln!("skipped: running as root");
+            return;
+        }
+        let total = count_files(&src);
+        let (mut done, mut skipped) = (0u32, 0u32);
+        let res = copy_tree(&src, &dst, total, &mut done, &mut skipped, &|_, _, _| {});
+        chmod(&src.join("lockeddir"), 0o755); // so cleanup can remove it
+        chmod(&src.join("locked.bin"), 0o644);
+        res.expect("a locked entry must not abort the clone");
+        assert_eq!(done, 2, "the two readable files copied");
+        assert_eq!(skipped, 2, "locked file + locked dir counted as skipped");
+        assert!(dst.join("AvatarMP.exe").is_file());
+        assert!(dst.join("ok.txt").is_file());
+        assert!(is_game_dir(&dst), "playable despite skips");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn readonly_destination_is_overwritten_on_reclone() {
+        let src = tmp("ro_src");
+        let dst = tmp("ro_dst");
+        write(&src.join("AvatarMP.exe"), "v1");
+        chmod(&src.join("AvatarMP.exe"), 0o444);   // read-only source (zip/CD rip)
+        let (_, done, skipped) = run_copy(&src, &dst);
+        assert_eq!((done, skipped), (1, 0));
+        // fs::copy copied the read-only bit onto the clone; a re-clone must still overwrite.
+        chmod(&src.join("AvatarMP.exe"), 0o644);   // make the SOURCE editable again
+        write(&src.join("AvatarMP.exe"), "v2");    // the DESTINATION still carries read-only
+        let (_, done2, skipped2) = run_copy(&src, &dst);
+        assert_eq!((done2, skipped2), (1, 0), "read-only destination retried, not skipped");
+        assert_eq!(fs::read_to_string(dst.join("AvatarMP.exe")).unwrap(), "v2");
+    }
+
+    #[test]
+    fn drive_root_has_no_parent() {
+        // ensure_clone refuses `src.parent().is_none()` — this is what a drive root looks like.
+        #[cfg(unix)]
+        assert!(Path::new("/").parent().is_none());
+        #[cfg(windows)]
+        assert!(Path::new("E:\\").parent().is_none());
+        assert!(Path::new("/home").parent().is_some());
+    }
 }
