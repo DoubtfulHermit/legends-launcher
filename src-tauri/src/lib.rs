@@ -1386,11 +1386,13 @@ async fn play(settings: Settings, windowed: bool, username: Option<String>, tick
     // since this windowed client can't fullscreen itself). gamescope then scales it up.
     if (s.gamescope && !s.proton) || (s.proton && want_fullscreen) { s.fullscreen = false; }
     write_config(&dir, &s)?;
-    // Identity: when skipping menus AND logged in, pass the launcher's auth ticket to arena_link
-    // (it forwards it to the game server, which loads this account's real character). Otherwise
-    // no ticket → the match uses the default character.
-    let tk = if s.skip_menu { ticket.as_deref().unwrap_or("") } else { "" };
-    write_arena(&dir, &s, Some(tk))?;      // set on skip+login, else clear (Some("")) so none lingers
+    // Identity: pass the launcher's auth ticket to arena_link on EVERY signed-in launch (NOT gated
+    // on skip-menus) — arena_link forwards it to the game server, which loads this account's real
+    // character and credits wins to the account. Without it the player is an unauthenticated guest
+    // (default 999-HP char, nothing linked). Skip-menus separately controls the in-game AUTO-LOGIN
+    // (write_game_creds below). Empty (Some("")) when unsigned/unarmed so no stale ticket lingers.
+    let tk = ticket.as_deref().unwrap_or("");
+    write_arena(&dir, &s, Some(tk))?;
     // Logged-in skip-menus → drive the engine's OWN login (hands-off) so the match loads + builds the
     // REAL custom character. Needs the username (for the login POST) + a valid ticket (the password the
     // WININET hook substitutes). Not logged in → inject path (default character).

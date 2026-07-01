@@ -1372,11 +1372,16 @@ async function play(roomOverride, queueOverride){
   // Seamless identity: mint a ticket from the signed-in session so the game loads the REAL
   // character. Don't silently launch unarmed — warn so the player knows it'll be a manual login.
   let username=null, ticket=null;
-  if(settings.skip_menu){
-    const armed = SAVE.session ? await armTicket(settings.host) : null;
+  // Authenticate the game connection for EVERY signed-in launch — NOT just Skip-menus. The ticket
+  // is what makes the game server load the real account/character and credit wins to the account;
+  // without it you play as an unauthenticated guest (default 999-HP char, nothing linked). Skip-menus
+  // is a SEPARATE convenience (auto-submitting the in-game login), handled Rust-side via game creds.
+  if(SAVE.session){
+    const armed = await armTicket(settings.host);
     if(armed){ username=armed.username; ticket=armed.ticket; }
-    else if(SAVE.session){ toast('Couldn’t arm your account — sign in again. Launching with a manual login.','err'); }
-    else { toast('Not signed in — launching with a manual login.','err'); }
+    else { toast('Couldn’t arm your account — sign in again. Playing UNauthenticated (guest).','err'); }
+  } else {
+    toast('Not signed in — playing UNauthenticated (guest).','err');
   }
   // AUTO-LOGIN: with Skip-menus on + a ticket, the DLL submits this account's login in-game (fast)
   // and hands the menu to the player — so you never type the in-game login again. The launcher's job
