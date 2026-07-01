@@ -475,6 +475,24 @@
       <div class="modal-actions"><button class="modal-btn primary" id="helpClose" type="button">Got it</button></div>
     </div>
   </div>
+
+  <!-- create / rename / delete a custom character (one per nation) -->
+  <div id="charModal" class="modal" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-title" id="cmTitle">New character</div>
+      <div class="modal-body">
+        <div class="cm-nations" id="cmNations"></div>
+        <input id="cmName" class="cm-name" maxlength="24" placeholder="Character name" autocomplete="off" spellcheck="false" />
+        <p class="cm-err" id="cmErr" hidden></p>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn danger" id="cmDelete" type="button" hidden>Delete</button>
+        <span class="cm-spacer"></span>
+        <button class="modal-btn ghost" id="cmCancel" type="button">Cancel</button>
+        <button class="modal-btn primary" id="cmSave" type="button">Create</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- remade in-game menus (faithful, scalable) — same binary, shown on #/menu routes -->

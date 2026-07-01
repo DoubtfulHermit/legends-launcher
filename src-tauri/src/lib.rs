@@ -1638,6 +1638,45 @@ async fn friends_list(host: String, token: String) -> serde_json::Value {
     ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
 }
 
+// ── launcher: multi-character roster (up to 4 custom characters, one per nation) ──
+// Proxy the gateway's /launcher/characters* endpoints. nation: 1=Earth 2=Fire 3=Water
+// 4=Air (immutable per character); name is mutable. `select` also projects the chosen
+// character into the game's live slot so the next launch loads it.
+#[tauri::command]
+async fn characters_list(host: String, token: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "GET", "/launcher/characters", Some(&token), serde_json::json!({}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn character_create(host: String, token: String, nation: i64, name: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/launcher/characters", Some(&token),
+                serde_json::json!({"nation": nation, "name": name}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn character_rename(host: String, token: String, nation: i64, name: String) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/launcher/characters/rename", Some(&token),
+                serde_json::json!({"nation": nation, "name": name}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn character_select(host: String, token: String, nation: i64) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/launcher/characters/select", Some(&token),
+                serde_json::json!({"nation": nation}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+#[tauri::command]
+async fn character_delete(host: String, token: String, nation: i64) -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(move ||
+        gw_json(&host, "POST", "/launcher/characters/delete", Some(&token),
+                serde_json::json!({"nation": nation}))
+    ).await.unwrap_or_else(|_| serde_json::json!({"ok": false}))
+}
+
 // ── account self-service: forgot / change password / sign-out-all / delete ────
 #[tauri::command]
 async fn account_forgot(host: String, ident: String) -> serde_json::Value {
@@ -1960,7 +1999,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, invite_send, invite_respond, invite_outgoing, invite_cancel, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start, ranked_queue, ranked_cancel, ranked_status, ranked_me, ranked_leaderboard, account_forgot, account_change_password, account_delete, session_logout_all, os_notify, save_loading_image])
+        .invoke_handler(tauri::generate_handler![load, save, locate, play, status, sync, prepare_clone, check_updates, check_self_update, self_update, restart, open_url, set_textures, menu_init, gw_login, gw_ticket, gw_ticket_session, session_login, session_ping, session_logout, friends_list, friend_request, friend_respond, friend_remove, friend_cancel, friend_block, friend_unblock, friend_favorite, friend_nickname, characters_list, character_create, character_rename, character_select, character_delete, invite_send, invite_respond, invite_outgoing, invite_cancel, friends_recent, leaderboard, career, matches_recent, match_replay, party_get, party_create, party_invite, party_join, party_leave, party_ready, party_kick, party_start, ranked_queue, ranked_cancel, ranked_status, ranked_me, ranked_leaderboard, account_forgot, account_change_password, account_delete, session_logout_all, os_notify, save_loading_image])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

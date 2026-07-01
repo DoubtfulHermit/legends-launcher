@@ -18,6 +18,12 @@ const FALLBACK = {
   gw_login: { ok:true, screen_name:null }, gw_ticket: { ok:false }, gw_ticket_session: { ok:false },
   check_updates: { ok:true }, sync: { ok:true, updated:[], failed:[] },
   session_login: { ok:true, token:'demo-token' }, session_ping: { ok:true }, session_logout: { ok:true },
+  // multi-character roster (browser preview): two created characters, Air active.
+  characters_list: { ok:true, active_nation:4, characters:[
+    { nation:2, name:'Ember',  appearance:'', level:5, xp:820, gold:150, wins:9, bending_ids:'1,2,7,8', active:false, created:true },
+    { nation:4, name:'Hermit', appearance:'', level:3, xp:120, gold:40,  wins:2, bending_ids:'1,2,3,4', active:true,  created:true } ] },
+  character_create: { ok:true }, character_rename: { ok:true }, character_delete: { ok:true },
+  character_select: { ok:true, active_nation:4 },
   // Rich demo bundle so the social panel is fully previewable in a plain browser (no Tauri).
   friends_list: { ok:true, me:'Aang',
     friends:[
@@ -746,7 +752,7 @@ function setView(v){
   if(v==='ranks') renderBoard();
   if(v==='match') syncMatch();
   if(v==='settings') syncDrawer();
-  if(v==='character') renderCharacter();
+  if(v==='character') loadCharacters();
   if(v==='home' && typeof loadFriends==='function') loadFriends();
   if(typeof setStatus==='function' && !_inGame) setStatus(v==='settings' ? 'in settings' : 'in lobby');
   updateCTA();
@@ -762,29 +768,59 @@ $('navNews').addEventListener('click', e=>{ e.preventDefault(); setView('ranks')
 // Scaffolding for the in-game character (loadout/attrs are local previews for now). The radial
 // re-themes the launcher to the chosen nation (setElement); the tab + roster pull your name.
 const NATIONS = { fire:'Firebender', water:'Waterbender', earth:'Earthbender', air:'Airbender' };
-const BEND_SKILLS = {
-  fire: ['Fire Blast','Flame Lash','Heat Wave','Meteor'],
-  water:['Water Jet','Ice Spike','Tide Pull','Tsunami'],
-  earth:['Boulder','Rock Wall','Tremor','Avalanche'],
-  air:  ['Air Blast','Wind Slice','Cyclone','Tempest'],
+// nation ids on the wire (matches the gateway + game): 1=Earth 2=Fire 3=Water 4=Air.
+const NATION_ID = { earth:1, fire:2, water:3, air:4 };
+const EL_BY_NATION = { 1:'earth', 2:'fire', 3:'water', 4:'air' };
+// Skills are 8 shared FAMILIES, reskinned per nation. The engine only knows families;
+// these names are a pure launcher-side display layer. A loadout is 4 families (default 1,2,3,4).
+const SKILL_FAMILY = {1:'Line',2:'Missile',3:'Cone',4:'Grenade',5:'Ground AoE',6:'Full AoE',7:'Heal',8:'Teleport'};
+const SKILL_NAMES = {
+  fire:  {1:'Fire Whip',  2:'Fireball',   3:'Flame Breath', 4:'Fire Bomb',   5:'Wall of Flame', 6:'Firestorm',  7:'Warmth',         8:'Flame Step'},
+  water: {1:'Water Whip', 2:'Ice Spike',  3:'Water Spout',  4:'Ice Bomb',    5:'Tidal Surge',   6:'Maelstrom',  7:'Healing Waters', 8:'Mist Step'},
+  earth: {1:'Stone Lance',2:'Boulder',    3:'Gravel Blast', 4:'Rock Charge', 5:'Tremor',        6:'Earthquake', 7:'Rejuvenate',     8:'Earth Glide'},
+  air:   {1:'Air Slice',  2:'Wind Blast', 3:'Gale',         4:'Air Pocket',  5:'Cyclone',       6:'Tempest',    7:'Second Wind',    8:'Air Scooter'},
 };
+const skillName = (el, fam) => (SKILL_NAMES[el] && SKILL_NAMES[el][fam]) || ('Family '+fam);
+// ── multi-character roster (up to 4 custom characters, one per nation) ──────────
+// CHARS mirrors the gateway: the account's created characters + the active nation.
+// loaded=false → offline / not signed in / gateway without the endpoints; we then fall
+// back to the single-slot (session name) view so the tab still works.
+let CHARS = { list:[], active:null, loaded:false };
+const activeChar = () => CHARS.loaded ? (CHARS.list.find(c=>c.nation===CHARS.active) || null) : null;
 const CHAR_ATTRS = [['power','Power'],['speed','Speed'],['defense','Defense'],['chi','Chi'],['vitality','Vitality']];
 const ATTR_BASE = 3, ATTR_MAX = 10, ATTR_POOL = 5;
 const charName = () => (SAVE.session && SAVE.session.name) || 'Character';
+const charDisplayName = () => { const c=activeChar(); return c ? c.name : charName(); };
 function syncCharTab(){ const a=$('navCharacter'); if(a) a.textContent = 'Character'; }  /* tab stays "Character"; the real name lives in the hover flyout */
 function renderRoster(){
-  const nm=charName(), host=$('charRoster'); if(!host) return;
-  host.innerHTML =
-    `<button class="char-slot on" title="${esc(nm)}"><span class="cs-av" style="--ah:${nameHue(nm)}">${initials(nm)}</span></button>`
-    + `<button class="char-slot add" title="New character — coming soon">+</button>`;
+  const host=$('charRoster'); if(!host) return;
+  if(!CHARS.loaded){                                    // offline / legacy — single slot (previous behavior)
+    const nm=charName();
+    host.innerHTML =
+      `<button class="char-slot on" title="${esc(nm)}"><span class="cs-av" style="--ah:${nameHue(nm)}">${initials(nm)}</span></button>`
+      + `<button class="char-slot add" data-act="add" title="New character">+</button>`;
+    return;
+  }
+  let html = CHARS.list.map(c=>{
+    const el=EL_BY_NATION[c.nation], on=(c.nation===CHARS.active);
+    return `<button class="char-slot cslot${on?' on':''}" data-nation="${c.nation}" `
+      + `title="${esc(c.name)} · ${NATIONS[el]} · Lv ${c.level}${on?' — click to rename/delete':''}">`
+      + `<span class="cs-av el-${el}" style="--ah:${nameHue(c.name)}">${initials(c.name)}</span></button>`;
+  }).join('');
+  if(CHARS.list.length < 4) html += `<button class="char-slot add" data-act="add" title="Create a character">+</button>`;
+  host.innerHTML = html;
 }
 function renderLoadout(){
-  const el=SAVE.element, names=BEND_SKILLS[el]||BEND_SKILLS.fire, host=$('loadout'); if(!host) return;
-  host.innerHTML = names.map((n,i)=>
-    `<button class="skill" title="${esc(n)} — loadout editing coming soon">`
+  const c=activeChar(), el=(c?EL_BY_NATION[c.nation]:SAVE.element), host=$('loadout'); if(!host) return;
+  const fams=(c&&c.bending_ids?String(c.bending_ids):'1,2,3,4').split(',').map(x=>parseInt(x,10)).filter(x=>x>0).slice(0,4);
+  while(fams.length<4) fams.push([1,2,3,4][fams.length]);
+  host.innerHTML = fams.map((fam,i)=>{
+    const nm=skillName(el,fam);
+    return `<button class="skill" title="${esc(nm)} — loadout editing coming soon">`
     + `<span class="sk-key">${i+1}</span>`
     + `<span class="sk-ic"><svg class="el el-${el}" width="26" height="26"><use href="#el-${el}"/></svg></span>`
-    + `<b>${esc(n)}</b><small>Skill</small></button>`).join('');
+    + `<b>${esc(nm)}</b><small>${esc(SKILL_FAMILY[fam]||'Skill')}</small></button>`;
+  }).join('');
 }
 function renderAttrs(){
   const a=SAVE.char.attrs||(SAVE.char.attrs={}), host=$('attrs'); if(!host) return;
@@ -800,19 +836,61 @@ function renderAttrs(){
   }).join('');
 }
 function renderCharacter(){
-  $('charName').textContent = charName();
-  $('charElement').textContent = NATIONS[SAVE.element] || 'Choose your bending';
-  ['crEmblem','ciEmblem'].forEach(id=>{ const em=$(id); if(em){ em.setAttribute('class','el el-'+SAVE.element+' cr-emblem'); em.querySelector('use').setAttribute('href','#el-'+SAVE.element); } });
-  document.querySelectorAll('#charRadial .cr-node').forEach(n=>n.classList.toggle('on', n.dataset.el===SAVE.element));
+  const c=activeChar(), el=(c?EL_BY_NATION[c.nation]:SAVE.element);
+  $('charName').textContent = charDisplayName();
+  $('charElement').textContent = c ? (NATIONS[el]+' · Lv '+c.level) : (NATIONS[SAVE.element] || 'Choose your bending');
+  ['crEmblem','ciEmblem'].forEach(id=>{ const em=$(id); if(em){ em.setAttribute('class','el el-'+el+' cr-emblem'); em.querySelector('use').setAttribute('href','#el-'+el); } });
+  document.querySelectorAll('#charRadial .cr-node').forEach(n=>n.classList.toggle('on', n.dataset.el===el));
   renderRoster(); renderLoadout(); renderAttrs();
 }
-$('charRadial').addEventListener('click', e=>{ const n=e.target.closest('.cr-node'); if(n){ setElement(n.dataset.el, true); renderCharacter(); } });
+// pull the account's roster from the gateway; theme the launcher to the active character.
+async function loadCharacters(){
+  const r = await sx('characters_list');
+  if(r && r.ok && Array.isArray(r.characters)){
+    CHARS.list = r.characters.slice().sort((a,b)=>a.nation-b.nation);
+    CHARS.active = r.active_nation || (r.characters.find(c=>c.active)||{}).nation || null;
+    CHARS.loaded = true;
+    const el = EL_BY_NATION[CHARS.active];
+    if(el && el!==SAVE.element) setElement(el, false);      // theme follows the active character
+  } else {
+    CHARS = { list:[], active:null, loaded:false };
+  }
+  if(typeof syncFly==='function') syncFly();
+  renderCharacter();
+}
+// select a nation-character = set active on the gateway + project it for the next launch.
+async function doSelect(nation){
+  const r = await sx('character_select', { nation });
+  if(r && r.ok){
+    CHARS.active = nation; CHARS.list.forEach(c=>c.active=(c.nation===nation));
+    const el=EL_BY_NATION[nation]; if(el) setElement(el, true);
+    if(typeof syncFly==='function') syncFly();
+    renderCharacter();
+    return true;
+  }
+  toast((r&&r.error)||'Could not switch character.','err'); return false;
+}
+// radial: pick a nation → select its character if it exists, else start creating one.
+$('charRadial').addEventListener('click', e=>{ const n=e.target.closest('.cr-node'); if(!n) return;
+  const el=n.dataset.el, nation=NATION_ID[el];
+  if(CHARS.loaded){
+    if(CHARS.list.some(c=>c.nation===nation)){ if(nation!==CHARS.active) doSelect(nation); }
+    else openCharModal('create', nation);
+  } else { setElement(el, true); renderCharacter(); }
+});
 $('attrs').addEventListener('click', e=>{ const b=e.target.closest('.attr-btn'); if(!b||b.disabled) return;
   const k=b.closest('.attr').dataset.k, a=SAVE.char.attrs;
   if(b.classList.contains('inc')) a[k]=(a[k]||0)+1; else a[k]=Math.max(0,(a[k]||0)-1);
   persist(); renderAttrs(); });
 $('loadout').addEventListener('click', e=>{ if(e.target.closest('.skill')) toast('Loadout editing is coming soon.','ok'); });
-$('charRoster').addEventListener('click', e=>{ if(e.target.closest('.char-slot.add')) toast('Multiple custom characters are coming soon.','ok'); });
+// roster: "+" creates, a slot selects, clicking the active slot again opens rename/delete.
+$('charRoster').addEventListener('click', e=>{
+  if(e.target.closest('.char-slot.add')){ openCharModal('create'); return; }
+  const slot=e.target.closest('.char-slot[data-nation]'); if(!slot) return;
+  const nation=+slot.dataset.nation;
+  if(CHARS.loaded && nation===CHARS.active) openCharModal('edit', nation);
+  else doSelect(nation);
+});
 
 // hover the central element circle → the quick-swap "+" picker blooms open (hover-intent, so a
 // brief gap between circle and menu doesn't snap it shut). Clicking an element swaps your bender.
@@ -834,11 +912,72 @@ if(navEl){
   navEl.addEventListener('mouseleave', ()=>{ _flyTimer=setTimeout(()=>navEl.classList.remove('fly-open'), 160); });
 }
 if(charFly) charFly.addEventListener('click', e=>{ const b=e.target.closest('.cf-el'); if(!b) return; e.stopPropagation();
-  const el=b.dataset.el; if(el!==SAVE.element){ setElement(el, true); toast('Now bending '+el[0].toUpperCase()+el.slice(1),'ok'); }
+  const el=b.dataset.el, nation=NATION_ID[el];
+  if(CHARS.loaded){
+    if(CHARS.list.some(c=>c.nation===nation)){
+      if(nation!==CHARS.active){ const nm=(CHARS.list.find(c=>c.nation===nation)||{}).name; doSelect(nation); toast('Now playing '+esc(nm||el),'ok'); }
+    } else { setView('character'); openCharModal('create', nation); }
+  } else if(el!==SAVE.element){ setElement(el, true); toast('Now bending '+el[0].toUpperCase()+el.slice(1),'ok'); }
   syncFly();
   if(typeof renderCharacter==='function' && curView==='character') renderCharacter();
   clearTimeout(_flyTimer); navEl.classList.remove('fly-open');
 });
+
+// ── character create / rename / delete dialog (reuses the .modal visual style) ──
+let _cmMode='create', _cmNation=null;
+function openCharModal(mode, nation){
+  if(!CHARS.loaded){ toast('Sign in to manage characters.','err'); return; }
+  _cmMode=mode; _cmNation = (mode==='edit') ? nation : (nation||null);
+  const created=new Set(CHARS.list.map(c=>c.nation));
+  $('cmNations').innerHTML = [1,2,3,4].map(n=>{ const el=EL_BY_NATION[n], made=created.has(n);
+    const dis = (mode==='create') ? made : true;      // create: only uncreated pickable; edit: nation fixed
+    return `<button class="cm-el el-${el}${made?' made':''}" data-nation="${n}" ${dis?'disabled':''} title="${NATIONS[el]}${made?' — already created':''}">`
+      + `<span class="cm-emb"><svg class="el el-${el}"><use href="#el-${el}"/></svg></span>`
+      + `<b>${NATIONS[el].replace('bender','')}</b></button>`; }).join('');
+  const c = (mode==='edit') ? CHARS.list.find(x=>x.nation===nation) : null;
+  $('cmTitle').textContent = (mode==='edit') ? 'Edit character' : 'New character';
+  $('cmName').value = c ? c.name : '';
+  $('cmSave').textContent = (mode==='edit') ? 'Save' : 'Create';
+  const del=$('cmDelete'); del.hidden = (mode!=='edit'); del.dataset.armed=''; del.textContent='Delete';
+  $('cmErr').hidden=true; $('cmErr').textContent='';
+  syncCmNation();
+  $('charModal').setAttribute('aria-hidden','false');
+  setTimeout(()=>$('cmName').focus(), 40);
+}
+function syncCmNation(){ document.querySelectorAll('#cmNations .cm-el').forEach(b=>b.classList.toggle('sel', +b.dataset.nation===_cmNation)); }
+function closeCharModal(){ $('charModal').setAttribute('aria-hidden','true'); }
+function _cmShowErr(m){ const e=$('cmErr'); e.textContent=m; e.hidden=false; }
+async function cmSave(){
+  const name=$('cmName').value.trim();
+  if(!name) return _cmShowErr('Enter a name.');
+  if(_cmMode==='create'){
+    if(!_cmNation) return _cmShowErr('Pick a nation.');
+    const r=await sx('character_create',{ nation:_cmNation, name });
+    if(r&&r.ok){ closeCharModal(); await loadCharacters(); if(CHARS.active!==_cmNation) await doSelect(_cmNation); toast('Created '+esc(name),'ok'); }
+    else _cmShowErr((r&&r.error)||'Could not create character.');
+  } else {
+    const r=await sx('character_rename',{ nation:_cmNation, name });
+    if(r&&r.ok){ closeCharModal(); await loadCharacters(); toast('Renamed to '+esc(name),'ok'); }
+    else _cmShowErr((r&&r.error)||'Could not rename.');
+  }
+}
+async function cmDelete(){
+  const del=$('cmDelete');
+  if(!del.dataset.armed){ del.dataset.armed='1'; del.textContent='Confirm delete'; return; }   // two-step guard
+  const r=await sx('character_delete',{ nation:_cmNation });
+  if(r&&r.ok){ closeCharModal(); await loadCharacters(); toast('Character deleted','ok'); }
+  else _cmShowErr((r&&r.error)||'Could not delete.');
+}
+{ const cm=$('charModal');
+  if(cm){
+    $('cmNations').addEventListener('click', e=>{ const b=e.target.closest('.cm-el'); if(!b||b.disabled) return; _cmNation=+b.dataset.nation; syncCmNation(); });
+    $('cmSave').addEventListener('click', cmSave);
+    $('cmDelete').addEventListener('click', cmDelete);
+    $('cmCancel').addEventListener('click', closeCharModal);
+    cm.addEventListener('click', e=>{ if(e.target===cm) closeCharModal(); });
+    $('cmName').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); cmSave(); } else if(e.key==='Escape') closeCharModal(); });
+  }
+}
 
 // draw the running underline: flat under the tabs, rising into a hump around the element circle
 function layoutNavLine(){
