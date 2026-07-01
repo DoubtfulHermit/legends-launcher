@@ -1,6 +1,6 @@
 [package]
 name = "launcher"
-version = "0.1.54"
+version = "0.1.55"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -28,4 +28,5 @@ serde_json = "1"
 ureq = { version = "2", features = ["json"] }
 sha2 = "0.10"
 png = "0.17"   # decode the launcher-rendered loading PNG → BMP (pure-Rust, cross-compiles cleanly)
+qbsdiff = "1.4"   # apply the bundled binary delta: player's own AvatarMP.exe → AvatarMP_Windowed.exe
 

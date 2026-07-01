@@ -265,6 +265,51 @@ fn copy_file_force(from: &Path, to: &Path) -> std::io::Result<u64> {
         }
     }
 }
+// ── AvatarMP_Windowed.exe: reconstructed LOCALLY from the player's own AvatarMP.exe ──────────
+// AvatarMP_Windowed.exe is a Config.ini-respecting build of the same Virtools 4.0 Custom Player
+// as the retail AvatarMP.exe (retail hardcodes 800x600 fullscreen; the windowed build parses the
+// resolution from Config.ini — the reason high-res / windowed works). It is NOT a byte patch of
+// retail (different build), but the two share ~77% of their code, so a bsdiff delta from retail to
+// the windowed build is tiny (~2.2 KB). We bundle that delta and rebuild the windowed exe on the
+// player's machine from THEIR OWN AvatarMP.exe — so the server never has to host a game binary.
+const WINDOWED_PATCH: &[u8] = include_bytes!("../assets/AvatarMP_Windowed.qbspatch");
+// sha256 of the retail AvatarMP.exe the delta was built against, and of the windowed exe it
+// reconstructs. The source check avoids feeding a mismatched/region-different retail exe to the
+// patcher (garbage out); the target check is the integrity gate — we only write a byte-exact result.
+const RETAIL_EXE_SHA: &str = "6717d424a4754b7ab95d5125c23384d913794df0269041d5cf51ae3ca46c501e";
+const WINDOWED_EXE_SHA: &str = "f334cd2792d04b6d7382f4475179ce4332d8303c38ef1c998ac6e2646d72acbd";
+
+// Rebuild dir/AvatarMP_Windowed.exe from dir/AvatarMP.exe + the bundled delta. Idempotent and
+// self-verifying: returns Ok(true) if a correct windowed exe is present afterwards, Ok(false) if
+// we couldn't produce one (e.g. the player's retail exe differs from the delta's base) so the
+// caller can fall back to the content-patcher copy. Never writes a wrong-hash file.
+fn rebuild_windowed_exe(dir: &Path) -> Result<bool, String> {
+    let target = dir.join("AvatarMP_Windowed.exe");
+    if fs::read(&target).map(|b| sha256_hex(&b) == WINDOWED_EXE_SHA).unwrap_or(false) {
+        return Ok(true);                          // already correct — nothing to do
+    }
+    let base = match fs::read(dir.join("AvatarMP.exe")) {
+        Ok(b) => b,
+        Err(_) => return Ok(false),               // no retail exe to patch (leave whatever's there)
+    };
+    if sha256_hex(&base) != RETAIL_EXE_SHA {
+        log_line("rebuild_windowed_exe: AvatarMP.exe hash differs from the delta base — skipping");
+        return Ok(false);                         // different retail build → patcher would emit garbage
+    }
+    let patcher = qbsdiff::Bspatch::new(WINDOWED_PATCH).map_err(|e| format!("bspatch init: {e}"))?;
+    let mut out = Vec::with_capacity(patcher.hint_target_size() as usize);
+    patcher.apply(&base, std::io::Cursor::new(&mut out)).map_err(|e| format!("bspatch apply: {e}"))?;
+    if sha256_hex(&out) != WINDOWED_EXE_SHA {
+        log_line("rebuild_windowed_exe: reconstructed hash mismatch — NOT writing");
+        return Ok(false);                         // integrity gate — never ship a wrong exe
+    }
+    let tmp = target.with_extension("rebuild.tmp");
+    fs::write(&tmp, &out).and_then(|_| fs::rename(&tmp, &target))
+        .map_err(|e| { let _ = fs::remove_file(&tmp); format!("write AvatarMP_Windowed.exe: {e}") })?;
+    log_line("rebuild_windowed_exe: reconstructed AvatarMP_Windowed.exe from AvatarMP.exe + delta");
+    Ok(true)
+}
+
 // Ensure a fresh clone of the original exists in the home. No-op when the clone is
 // present and its source fingerprint is unchanged. Returns the clone dir.
 fn ensure_clone(on: &dyn Fn(u32, u32, &str)) -> Result<PathBuf, String> {
@@ -309,6 +354,10 @@ fn ensure_clone(on: &dyn Fn(u32, u32, &str)) -> Result<PathBuf, String> {
              skipped). If your game is installed at a drive root (e.g. E:\\), move it into a \
              subfolder such as E:\\Avatar and click Retry."));
     }
+    // Rebuild the Config-respecting AvatarMP_Windowed.exe locally from the player's own AvatarMP.exe
+    // (+ the bundled delta) so the server needn't host a game binary. Non-fatal: if the player's
+    // retail exe doesn't match the delta base, the content-patcher copy stays the fallback.
+    let _ = rebuild_windowed_exe(&dst);
     // Only mark the clone "current" when NOTHING real was skipped (name-skipped protected system
     // folders don't count). If a game file was locked (AV scan in progress etc.), leaving the meta
     // unwritten makes the next launch re-run this overwrite-copy and fill the gap once the lock
@@ -999,6 +1048,10 @@ fn run_sync(host: &str, on_progress: impl Fn(SyncProgress)) -> SyncOut {
         out.error = Some("Couldn't write game files — close the game and make sure the \
             folder isn't read-only (avoid Program Files, or run as administrator).".into());
     }
+    // Guarantee the Config-respecting windowed exe exists, rebuilt from the player's own
+    // AvatarMP.exe. Covers already-cloned users (whose clone is a fingerprint no-op so ensure_clone
+    // never re-ran) and future-proofs dropping it from the manifest — sync then still provides it.
+    let _ = rebuild_windowed_exe(&dir);
     log_line(&format!("sync: done dir={dir:?} checked={} todo={} updated={} failed={:?} error={:?}",
         out.checked, total, out.updated.len(), out.failed, out.error));
     out
@@ -2220,4 +2273,51 @@ mod clone_tests {
         assert!(Path::new("E:\\").parent().is_none());
         assert!(Path::new("/home").parent().is_some());
     }
+
+    // ── AvatarMP_Windowed.exe delta reconstruction ───────────────────────────
+    #[test]
+    fn bundled_delta_parses_as_valid_qbsdiff() {
+        // The committed asset must be a well-formed qbsdiff stream, or every clone silently loses
+        // its windowed exe. This catches a corrupted/truncated/empty asset at CI time.
+        assert!(!WINDOWED_PATCH.is_empty(), "delta asset is empty");
+        qbsdiff::Bspatch::new(WINDOWED_PATCH).expect("bundled delta is not a valid qbsdiff patch");
+    }
+
+    #[test]
+    fn rebuild_skips_when_base_missing_or_wrong() {
+        // No AvatarMP.exe → Ok(false), nothing written.
+        let d = tmp("win_nobase");
+        assert_eq!(rebuild_windowed_exe(&d).unwrap(), false);
+        assert!(!d.join("AvatarMP_Windowed.exe").exists());
+        // A retail exe that doesn't match the delta base → Ok(false), NO garbage written.
+        let d2 = tmp("win_wrongbase");
+        write(&d2.join("AvatarMP.exe"), "definitely not the real retail player");
+        assert_eq!(rebuild_windowed_exe(&d2).unwrap(), false);
+        assert!(!d2.join("AvatarMP_Windowed.exe").exists(), "must not write a wrong-hash exe");
+    }
+
+    #[test]
+    fn rebuild_reconstructs_exact_exe_from_real_retail() {
+        // Full end-to-end proof, gated on the real retail exe being present (skips in CI where it
+        // isn't — the game exe is never committed). Applies the BUNDLED delta to a real AvatarMP.exe
+        // and asserts the reconstructed AvatarMP_Windowed.exe matches the known-good sha byte-for-byte.
+        let retail = std::env::var("AVATAR_RETAIL_EXE").ok().map(PathBuf::from).or_else(|| {
+            let p = dirs_home().join(".wine/drive_c/Program Files (x86)/NickOnline/\
+                Avatar - Legends of the Arena/AvatarMP.exe");
+            p.is_file().then_some(p)
+        });
+        let Some(retail) = retail.filter(|p| p.is_file()) else {
+            eprintln!("skip: no real AvatarMP.exe (set AVATAR_RETAIL_EXE to run)"); return;
+        };
+        // sanity: the local retail exe is the delta's base
+        assert_eq!(sha256_hex(&fs::read(&retail).unwrap()), RETAIL_EXE_SHA, "unexpected retail exe");
+        let d = tmp("win_real");
+        fs::copy(&retail, d.join("AvatarMP.exe")).unwrap();
+        assert_eq!(rebuild_windowed_exe(&d).unwrap(), true);
+        let out = fs::read(d.join("AvatarMP_Windowed.exe")).unwrap();
+        assert_eq!(sha256_hex(&out), WINDOWED_EXE_SHA, "reconstruction not byte-exact");
+        // idempotent: a second call is a no-op that still reports present.
+        assert_eq!(rebuild_windowed_exe(&d).unwrap(), true);
+    }
+    fn dirs_home() -> PathBuf { std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default() }
 }
